@@ -64,6 +64,25 @@ exports.addItem=async(req,res,next)=>{
   }catch(e){next(e);}
 };
 
+exports.updateItem=async(req,res,next)=>{
+  try{
+    const{order_no,question_text,option_a,option_b,option_c,option_d,correct_answer,remove_image}=req.body;
+    if(!question_text||!option_a||!option_b||!option_c||!option_d||!correct_answer) return res.status(400).json({message:'Pertanyaan, opsi A-D, dan jawaban benar wajib'});
+    const[[existing]]=await db.query('SELECT image_url FROM question_bank_items WHERE id=? AND bank_id=?',[req.params.itemId,req.params.id]);
+    if(!existing) return res.status(404).json({message:'Item soal tidak ditemukan'});
+
+    let finalImageUrl=existing.image_url||null;
+    if(req.file) finalImageUrl=`/uploads/${req.file.filename}`;
+    else if(String(remove_image||'0')==='1') finalImageUrl=null;
+
+    await db.query(
+      'UPDATE question_bank_items SET order_no=?,question_text=?,image_url=?,option_a=?,option_b=?,option_c=?,option_d=?,correct_answer=? WHERE id=? AND bank_id=?',
+      [order_no||1,question_text,finalImageUrl,option_a,option_b,option_c,option_d,correct_answer,req.params.itemId,req.params.id]
+    );
+    res.json({message:'Item soal diperbarui'});
+  }catch(e){next(e);}
+};
+
 exports.removeItem=async(req,res,next)=>{
   try{await db.query('DELETE FROM question_bank_items WHERE id=?',[req.params.itemId]);res.json({message:'Item soal dihapus'});}catch(e){next(e);}
 };
