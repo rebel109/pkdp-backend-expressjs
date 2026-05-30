@@ -3,9 +3,10 @@ const express=require('express'),cors=require('cors'),path=require('path');
 const { authenticate, ensureNotCertificateOnly } = require('./middlewares/auth');
 const { uploadImage, uploadAny, maxUploadSizeMb } = require('./middlewares/upload');
 const app=express();
+const uploadDir=path.resolve(process.env.UPLOAD_DIR||'uploads');
 app.use(cors({origin:process.env.CLIENT_URL||'http://localhost:5173',credentials:true}));
 app.use(express.json());app.use(express.urlencoded({extended:true}));
-app.use('/uploads',express.static(path.join(__dirname,'uploads')));
+app.use('/uploads',express.static(uploadDir));
 
 // Route upload untuk profile (gambar)
 app.post('/api/upload', authenticate, ensureNotCertificateOnly, uploadImage.single('file'), (req, res) => {
