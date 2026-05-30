@@ -1,0 +1,13 @@
+const r=require('express').Router(),c=require('../controllers/taskController'),{authenticate,authorize,ensurePaymentVerified,ensureBodyPeriodActive}=require('../middlewares/auth'),{uploadImage}=require('../middlewares/upload');
+r.use(authenticate);
+r.get('/',ensurePaymentVerified,c.getAll);r.get('/:id',ensurePaymentVerified,c.getOne);
+r.post('/',authorize('ADMIN'),ensureBodyPeriodActive,c.create);r.put('/:id',authorize('ADMIN'),c.update);r.delete('/:id',authorize('ADMIN'),c.remove);
+r.post('/:id/questions',authorize('ADMIN'),uploadImage.single('image'),c.addQuestion);
+r.put('/:id/questions/:qid',authorize('ADMIN'),uploadImage.single('image'),c.updateQuestion);
+r.delete('/:id/questions/:qid',authorize('ADMIN'),c.removeQuestion);
+r.post('/:id/instruments',authorize('ADMIN'),c.linkInstrument);r.delete('/:id/instruments/:insId',authorize('ADMIN'),c.unlinkInstrument);
+r.post('/:id/clone-question-bank',authorize('ADMIN'),c.cloneQuestionBank);
+r.post('/:id/clone-instrument-bank',authorize('ADMIN'),c.cloneInstrumentBank);
+r.get('/:id/snapshots',authorize('ADMIN'),c.getSnapshots);
+r.post('/:id/sync-legacy',authorize('ADMIN'),c.syncLegacyFromSnapshot);
+module.exports=r;

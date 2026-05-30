@@ -1,0 +1,13 @@
+const r=require('express').Router(),c=require('../controllers/classController'),{authenticate,authorize,ensureBodyPeriodActive}=require('../middlewares/auth');
+r.use(authenticate);
+r.get('/my',c.getMyClasses);r.get('/narasumber',c.getNarasumberClasses);r.get('/matrix',authorize('ADMIN'),c.getNarasumberMatrix);r.get('/my-schedule-matrix',authorize('DOSEN','NARASUMBER'),c.getMyScheduleMatrix);
+r.get('/export/participants-pdf',authorize('ADMIN'),c.exportParticipantsPdf);
+r.get('/',c.getAll);r.get('/:id',c.getOne);
+r.post('/',authorize('ADMIN'),ensureBodyPeriodActive,c.create);r.patch('/matrix/visibility',authorize('ADMIN'),c.setMatrixVisibility);r.put('/:id',authorize('ADMIN'),c.update);r.delete('/:id',authorize('ADMIN'),c.remove);
+r.post('/:id/narasumber',authorize('ADMIN'),c.assignNarasumber);r.delete('/:id/narasumber/:nsId/:mid',authorize('ADMIN'),c.removeNarasumber);
+r.delete('/:id/narasumber/:nsId',authorize('ADMIN'),c.removeNarasumber);
+r.post('/:id/members',authorize('ADMIN'),c.addMember);r.delete('/:id/members/:userId',authorize('ADMIN'),c.removeMember);
+r.post('/cohorts/generate',authorize('ADMIN'),ensureBodyPeriodActive,c.generateCohortClasses);
+r.post('/cohorts/:id/rebalance',authorize('ADMIN'),c.rebalanceCohort);
+r.delete('/cohorts/:id',authorize('ADMIN'),c.removeCohort);
+module.exports=r;
