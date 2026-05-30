@@ -231,6 +231,13 @@ const parseChoiceQuestion=q=>({
   ...q,
   options:[q.option_a,q.option_b,q.option_c,q.option_d,q.option_e].filter(Boolean)
 });
+const surveyChoiceLabel=(q,key)=>{
+  const normalized=String(key||'').toLowerCase();
+  const fallback={a:'Sangat Baik',b:'Baik',c:'Cukup',d:'Kurang',e:'Lainnya'};
+  const label=q?.[`option_${normalized}`];
+  if(label&&String(label).trim()&&!/^opsi\s+[a-e]$/i.test(String(label).trim())) return label;
+  return fallback[normalized]||String(key||'').toUpperCase();
+};
 
 const activeWindowWhere=`sa.is_active=1 AND (sa.opens_at IS NULL OR sa.opens_at<=NOW()) AND (sa.closes_at IS NULL OR sa.closes_at>=NOW())`;
 
@@ -821,8 +828,8 @@ const getAdminRecapData=async({period_id,target_role,survey_instance_id})=>{
   const[[survey]]=await db.query(
     `SELECT si.*
      FROM survey_instances si
-     WHERE si.id=? AND si.period_id=? AND si.target_role=? AND si.survey_kind=?`,
-    [survey_instance_id,period_id,target_role,survey_kind]
+     WHERE si.id=? AND si.period_id=? AND si.target_role=? AND si.survey_kind='GENERAL'`,
+    [survey_instance_id,period_id,target_role]
   );
   if(!survey){
     const err=new Error('Survei tidak ditemukan');
@@ -835,6 +842,7 @@ const getAdminRecapData=async({period_id,target_role,survey_instance_id})=>{
 
 const toCsvValue=value=>`"${String(value??'').replace(/"/g,'""')}"`;
 const buildRecapCsv=({survey,questions,details})=>{
+  const choiceLabel=(q,key)=>surveyChoiceLabel(q,key);
   const headers=['Nama','Email','Waktu Submit',...questions.map((q,idx)=>`Q${idx+1}`)];
   const rows=details.map(detail=>[
     detail.name||'',
@@ -847,12 +855,12 @@ const buildRecapCsv=({survey,questions,details})=>{
           ? (item.answer_text||'')
           : q.question_type==='scale_1_4'
             ? (item.answer_scale||'')
-            : String(item.answer_choice||'').toUpperCase()).filter(Boolean).join(' | ');
+            : choiceLabel(q,item.answer_choice)).filter(Boolean).join(' | ');
       }
       if(!ans) return '';
       if(q.question_type==='text') return ans.answer_text||'';
       if(q.question_type==='scale_1_4') return ans.answer_scale||'';
-      return String(ans.answer_choice||'').toUpperCase();
+      return choiceLabel(q,ans.answer_choice);
     })
   ]);
   return [headers,...rows].map(cols=>cols.map(toCsvValue).join(',')).join('\n');
@@ -1010,6 +1018,14 @@ exports.submitSurvey=async(req,res,next)=>{
       );
       if(!session) return res.status(404).json({message:'Survei tidak ditemukan'});
       const[questions]=await db.query('SELECT * FROM survey_bank_questions WHERE bank_id=? ORDER BY order_no,id',[session.bank_id]);
+      const[tasks]=await db.query(
+        `SELECT t.id
+         FROM survey_eval_session_tasks sest
+         JOIN tasks t ON t.id=sest.task_id
+         WHERE sest.session_id=?
+         ORDER BY t.order_no,t.title`,
+        [sessionId]
+      );
       const[narasumbers]=await db.query(
         `SELECT u.id
          FROM survey_eval_session_narasumbers sesn
@@ -1017,14 +1033,35 @@ exports.submitSurvey=async(req,res,next)=>{
          WHERE sesn.session_id=?`,
         [sessionId]
       );
-      const scopes=(narasumbers||[]).map(ns=>String(ns.id));
+      const scopes=[];
+      for(const task of tasks||[]){
+        for(const narasumber of narasumbers||[]){
+          scopes.push(`${task.id}:${narasumber.id}`);
+        }
+      }
       const isComplete=ensureSurveyAnswersComplete({
         answers,
         questions,
         scopeValues:scopes,
-        scopeResolver:answer=>String(answer?.narasumber_id||'')
+        scopeResolver:answer=>`${answer?.task_id||''}:${answer?.narasumber_id||''}`
       });
       if(!isComplete) return res.status(400).json({message:'Semua pertanyaan survei wajib diisi sebelum dikirim'});
+      const conn=await db.getConnection();
+      try{
+        await conn.beginTransaction();
+        const[[existing]]=await conn.query('SELECT id FROM survey_eval_responses WHERE session_id=? AND user_id=?',[sessionId,req.user.id]);
+        if(existing) return res.status(403).json({message:'Survei sudah dikunci (hanya 1x submit)'});
+        const[r]=await conn.query('INSERT INTO survey_eval_responses (session_id,user_id) VALUES (?,?)',[sessionId,req.user.id]);
+        const responseId=r.insertId;
+        for(const a of answers){
+          await conn.query(
+            'INSERT INTO survey_eval_answer_items (response_id,task_id,narasumber_id,question_id,answer_text,answer_choice,answer_scale) VALUES (?,?,?,?,?,?,?)',
+            [responseId,a.task_id,a.narasumber_id,a.question_id,a.answer_text||null,a.answer_choice||null,a.answer_scale||null]
+          );
+        }
+        await conn.commit();
+        return res.json({message:'Jawaban survei tersimpan'});
+      }catch(e){await conn.rollback();throw e;}finally{conn.release();}
     }
 
     const[[survey]]=await db.query('SELECT * FROM survey_instances WHERE id=? AND is_active=1 AND target_role=?',[req.params.id,role]);
@@ -1075,6 +1112,21 @@ exports.getAdminInstances=async(req,res,next)=>{
       [period_id,target_role]
     );
 
+    const[evalRows]=await db.query(
+      `SELECT CONCAT('eval-',ses.id) AS id,si.title,si.description,si.target_role,si.period_id,ses.is_active,COALESCE(MAX(ser.submitted_at),ses.created_at) AS created_at,
+              COUNT(DISTINCT q.id) AS question_count,
+              COUNT(DISTINCT ser.id) AS response_count,
+              'legacy' AS source_type
+       FROM survey_eval_sessions ses
+       JOIN survey_instances si ON si.id=ses.survey_instance_id
+       LEFT JOIN survey_bank_questions q ON q.bank_id=si.bank_id
+       LEFT JOIN survey_eval_responses ser ON ser.session_id=ses.id
+       WHERE ses.period_id=? AND si.target_role=? AND ses.is_active=1 AND si.is_active=1
+       GROUP BY ses.id,si.title,si.description,si.target_role,si.period_id,ses.is_active,ses.created_at
+       ORDER BY created_at DESC,ses.id DESC`,
+      [period_id,target_role]
+    );
+
     const[activationRows]=target_role==='DOSEN'
       ? await db.query(
           `SELECT CONCAT('act-',sa.id,'-map-',MIN(sia.id)) AS id,sa.title,sa.description,sa.target_role,sa.period_id,sa.is_active,sa.created_at,
@@ -1107,7 +1159,7 @@ exports.getAdminInstances=async(req,res,next)=>{
       [period_id,target_role]
     );
 
-    const merged=[...legacyRows,...activationRows,...(ojcActivationRows||[])];
+    const merged=[...legacyRows,...evalRows,...activationRows,...(ojcActivationRows||[])];
     const deduped=[];
     const seen=new Set();
     for(const row of merged){
