@@ -1,5 +1,21 @@
 const db = require('../config/db');
 
+const normalizeDateOnly = (value) => {
+  if (!value) return null;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    return trimmed.slice(0, 10);
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 exports.getMyStatus = async (req,res,next)=>{
   try{
     const [[user]] = await db.query(
@@ -29,11 +45,12 @@ exports.submit = async (req,res,next)=>{
     if(req.user.role!=='DOSEN') return res.status(403).json({message:'Akses ditolak'});
 
     const { employee_status, tmt_sk_dosen, functional_title } = req.body;
+    const normalizedTmtSkDosen = normalizeDateOnly(tmt_sk_dosen);
     const skFile = req.files?.sk_file?.[0] ? `/uploads/${req.files.sk_file[0].filename}` : (req.body.sk_file || null);
     const functionalTitleFile = req.files?.functional_title_file?.[0] ? `/uploads/${req.files.functional_title_file[0].filename}` : (req.body.functional_title_file || null);
 
     if(!employee_status || !['PNS','PPPK','NON_PNS'].includes(employee_status)) return res.status(400).json({message:'Status pegawai wajib dipilih'});
-    if(!tmt_sk_dosen) return res.status(400).json({message:'TMT SK Dosen wajib diisi'});
+    if(!normalizedTmtSkDosen) return res.status(400).json({message:'TMT SK Dosen wajib diisi'});
     if(!functional_title || !['ASISTEN_AHLI','LEKTOR','LEKTOR_KEPALA'].includes(functional_title)) return res.status(400).json({message:'Jabatan fungsional wajib dipilih'});
     if(!skFile) return res.status(400).json({message:'Upload SK Dosen wajib diisi'});
     if(!functionalTitleFile) return res.status(400).json({message:'Upload SK Jabatan Fungsional wajib diisi'});
@@ -42,13 +59,13 @@ exports.submit = async (req,res,next)=>{
       `INSERT INTO profiles (user_id,employee_status,sk_file,tmt_sk_dosen,functional_title,functional_title_file)
        VALUES (?,?,?,?,?,?)
        ON DUPLICATE KEY UPDATE employee_status=VALUES(employee_status),sk_file=VALUES(sk_file),tmt_sk_dosen=VALUES(tmt_sk_dosen),functional_title=VALUES(functional_title),functional_title_file=VALUES(functional_title_file)`,
-      [req.user.id,employee_status,skFile,tmt_sk_dosen,functional_title,functionalTitleFile]
+      [req.user.id,employee_status,skFile,normalizedTmtSkDosen,functional_title,functionalTitleFile]
     );
 
     await db.query(
       `INSERT INTO dosen_verification_submissions (user_id,period_id,employee_status,sk_file,tmt_sk_dosen,functional_title,functional_title_file,status)
        VALUES (?,?,?,?,?,?,?,'pending')`,
-      [req.user.id,req.user.period_id||null,employee_status,skFile,tmt_sk_dosen,functional_title,functionalTitleFile]
+      [req.user.id,req.user.period_id||null,employee_status,skFile,normalizedTmtSkDosen,functional_title,functionalTitleFile]
     );
 
     await db.query(
