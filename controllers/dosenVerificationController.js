@@ -113,7 +113,7 @@ exports.adminVerify = async (req,res,next)=>{
     if(!id) return res.status(400).json({message:'ID user tidak valid'});
 
     const [[submission]] = await db.query(
-      `SELECT dvs.id,dvs.user_id,dvs.status,u.role
+      `SELECT dvs.id,dvs.user_id,dvs.period_id,dvs.status,u.role
        FROM dosen_verification_submissions dvs
        JOIN users u ON u.id=dvs.user_id
        WHERE dvs.id=?`,
@@ -134,6 +134,13 @@ exports.adminVerify = async (req,res,next)=>{
        SET dosen_verification_status='verified', dosen_verification_verified_at=NOW(), dosen_verification_verified_by=?, dosen_verification_reject_reason=NULL
        WHERE id=?`,
       [req.user.id,submission.user_id]
+    );
+
+    await db.query(
+      `UPDATE user_period_roles
+       SET status='verified', source_type='dosen_verification_submission', source_id=?
+       WHERE user_id=? AND period_id=? AND role='DOSEN'`,
+      [submission.id, submission.user_id, submission.period_id]
     );
 
     res.json({message:'Verifikasi dosen tahap 1 berhasil disetujui'});

@@ -91,7 +91,7 @@ exports.adminVerify = async (req,res,next)=>{
     if(!id) return res.status(400).json({message:'ID submission tidak valid'});
 
     const [[submission]] = await db.query(
-      `SELECT id,user_id,status FROM payment_submissions WHERE id=?`,
+      `SELECT id,user_id,period_id,status FROM payment_submissions WHERE id=?`,
       [id]
     );
     if(!submission) return res.status(404).json({message:'Data pembayaran tidak ditemukan'});
@@ -109,6 +109,13 @@ exports.adminVerify = async (req,res,next)=>{
        SET payment_status='verified', payment_verified_at=NOW(), payment_verified_by=?, payment_reject_reason=NULL
        WHERE id=?`,
       [req.user.id, submission.user_id]
+    );
+
+    await db.query(
+      `UPDATE user_period_roles
+       SET status='verified', source_type='payment_submission', source_id=?
+       WHERE user_id=? AND period_id=? AND role='DOSEN'`,
+      [submission.id, submission.user_id, submission.period_id]
     );
 
     res.json({message:'Pembayaran berhasil diverifikasi'});
