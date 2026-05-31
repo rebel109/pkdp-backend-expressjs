@@ -5,6 +5,13 @@ const { uploadImage, uploadAny, maxUploadSizeMb } = require('./middlewares/uploa
 const app=express();
 const uploadDir=path.resolve(process.env.UPLOAD_DIR||'uploads');
 app.use(cors({origin:process.env.CLIENT_URL||'http://localhost:5173',credentials:true}));
+app.use((req,res,next)=>{
+  req.setTimeout(30000);
+  res.setTimeout(30000,()=>{
+    if(!res.headersSent) res.status(503).json({message:'Server terlalu lama merespons. Silakan coba lagi.'});
+  });
+  next();
+});
 app.use(express.json());app.use(express.urlencoded({extended:true}));
 app.use('/uploads',express.static(uploadDir));
 
