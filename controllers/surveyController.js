@@ -239,7 +239,7 @@ const surveyChoiceLabel=(q,key)=>{
   return fallback[normalized]||String(key||'').toUpperCase();
 };
 
-const activeWindowWhere=`sa.is_active=1 AND (sa.opens_at IS NULL OR sa.opens_at<=NOW()) AND (sa.closes_at IS NULL OR sa.closes_at>=NOW())`;
+const activeWindowWhere=`sa.is_active=1 AND (sa.opens_at IS NULL OR sa.opens_at<=DATE_ADD(UTC_TIMESTAMP(), INTERVAL 7 HOUR)) AND (sa.closes_at IS NULL OR sa.closes_at>=DATE_ADD(UTC_TIMESTAMP(), INTERVAL 7 HOUR))`;
 
 const isAnswerComplete=(answer,q)=>{
   if(!q) return false;

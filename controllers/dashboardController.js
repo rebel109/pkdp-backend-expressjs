@@ -3,13 +3,14 @@ exports.getStats=async(req,res,next)=>{
   try{
     const role=req.user.role;
     if(role==='ADMIN'){
+      const activePeriodWhere='t.period_id=(SELECT id FROM periods WHERE is_active=1 ORDER BY year DESC,id DESC LIMIT 1)';
       const[[{td}]]=await db.query("SELECT COUNT(*) AS td FROM users WHERE role='DOSEN'");
       const[[{tn}]]=await db.query("SELECT COUNT(*) AS tn FROM users WHERE role='NARASUMBER'");
-      const[[{ts}]]=await db.query("SELECT COUNT(*) AS ts FROM submissions");
-      const[[{avg}]]=await db.query("SELECT ROUND(AVG(final_score),2) AS avg FROM grades");
-      const[[{ap}]]=await db.query("SELECT COUNT(*) AS ap FROM submissions WHERE status='approved'");
-      const[recent]=await db.query(`SELECT s.id,u.name AS dosen_name,t.title,t.phase,s.status,s.submitted_at FROM submissions s JOIN users u ON u.id=s.user_id JOIN tasks t ON t.id=s.task_id ORDER BY s.submitted_at DESC LIMIT 10`);
-      const[by_phase]=await db.query(`SELECT t.phase,COUNT(s.id) AS total,SUM(s.status='approved') AS approved FROM submissions s JOIN tasks t ON t.id=s.task_id GROUP BY t.phase`);
+      const[[{ts}]]=await db.query(`SELECT COUNT(*) AS ts FROM submissions s JOIN tasks t ON t.id=s.task_id WHERE ${activePeriodWhere}`);
+      const[[{avg}]]=await db.query(`SELECT ROUND(AVG(g.final_score),2) AS avg FROM grades g JOIN submissions s ON s.id=g.submission_id JOIN tasks t ON t.id=s.task_id WHERE ${activePeriodWhere}`);
+      const[[{ap}]]=await db.query(`SELECT COUNT(*) AS ap FROM submissions s JOIN tasks t ON t.id=s.task_id WHERE ${activePeriodWhere} AND s.status='approved'`);
+      const[recent]=await db.query(`SELECT s.id,u.name AS dosen_name,t.title,t.phase,s.status,s.submitted_at FROM submissions s JOIN users u ON u.id=s.user_id JOIN tasks t ON t.id=s.task_id WHERE ${activePeriodWhere} ORDER BY s.submitted_at DESC LIMIT 10`);
+      const[by_phase]=await db.query(`SELECT t.phase,COUNT(s.id) AS total,SUM(s.status='approved') AS approved FROM submissions s JOIN tasks t ON t.id=s.task_id WHERE ${activePeriodWhere} GROUP BY t.phase`);
       const[periods]=await db.query(`SELECT p.*,COUNT(DISTINCT u.id) AS dosen_count FROM periods p LEFT JOIN users u ON u.period_id=p.id AND u.role='DOSEN' GROUP BY p.id ORDER BY p.year DESC`);
       return res.json({total_dosen:td,total_narasumber:tn,total_submissions:ts,avg_score:avg,completion_rate:ts>0?Math.round((ap/ts)*100):0,recent,by_phase,periods});
     }
