@@ -910,15 +910,27 @@ exports.allSummary=async(req,res,next)=>{
 
     // Summary stats
     const withNk=result.filter(r=>r.nk_final!=null);
+    const withIsc1=result.filter(r=>r.phase_scores?.isc1!=null);
+    const withOjc=result.filter(r=>r.phase_scores?.ojc!=null);
+    const withIsc2=result.filter(r=>r.phase_scores?.isc2!=null);
     const summary={
       total_dosen:dosens.length,
       avg_overall:withNk.length?round(withNk.reduce((sum,r)=>sum+r.nk_final,0)/withNk.length):0,
       lulus_count:result.filter(r=>r.status_kelulusan==='Lulus').length,
       tidak_lulus_count:result.filter(r=>r.status_kelulusan==='Tidak Lulus').length,
       by_phase:{
-        ISC1:{total:result.filter(r=>r.phase_scores?.isc1!=null).length},
-        OJC:{total:result.filter(r=>r.phase_scores?.ojc!=null).length},
-        ISC2:{total:result.filter(r=>r.phase_scores?.isc2!=null).length}
+        ISC1:{
+          total:result.filter(r=>r.phase_scores?.isc1!=null).length,
+          avg_score:withIsc1.length?round(withIsc1.reduce((sum,r)=>sum+r.phase_scores.isc1,0)/withIsc1.length):0
+        },
+        OJC:{
+          total:result.filter(r=>r.phase_scores?.ojc!=null).length,
+          avg_score:withOjc.length?round(withOjc.reduce((sum,r)=>sum+r.phase_scores.ojc,0)/withOjc.length):0
+        },
+        ISC2:{
+          total:result.filter(r=>r.phase_scores?.isc2!=null).length,
+          avg_score:withIsc2.length?round(withIsc2.reduce((sum,r)=>sum+r.phase_scores.isc2,0)/withIsc2.length):0
+        }
       }
     };
 
