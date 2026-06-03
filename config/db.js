@@ -13,7 +13,8 @@ const pool = mysql.createPool({
   timezone:dbTimeZone,
   connectTimeout:10000,
   enableKeepAlive:true,
-  keepAliveInitialDelay:0
+  keepAliveInitialDelay:0,
+  dateStrings: ['DATE']
 });
 
 const setConnectionTimeZone=connection=>connection.query(`SET time_zone = '${dbTimeZone}'`);

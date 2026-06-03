@@ -114,6 +114,7 @@ exports.verifyPassword=async(req,res,next)=>{
 exports.updateProfile=async(req,res,next)=>{
   try{
     const{full_name_with_title,full_name_without_title,avatar_url,gender,nik,nidn,birthplace,birthdate,unit_kerja,province,city,employee_status,sk_file,tmt_sk_dosen,functional_title,functional_title_file,diploma_file,golongan,npwp,nip,nuptk,institution,department,phone,address,bio,name,email,rekening_no,rekening_name,bank_name,cv_file,rekening_file}=req.body;
+    const normalizedBirthdate = normalizeDateOnly(birthdate);
     const normalizedTmtSkDosen = normalizeDateOnly(tmt_sk_dosen);
     if(req.user.role==='DOSEN'){
       const required={
@@ -150,7 +151,7 @@ exports.updateProfile=async(req,res,next)=>{
     await db.query(
       `INSERT INTO profiles (user_id,full_name_with_title,full_name_without_title,avatar_url,gender,nik,nidn,birthplace,birthdate,unit_kerja,province,city,employee_status,sk_file,tmt_sk_dosen,functional_title,functional_title_file,diploma_file,golongan,npwp,nip,nuptk,institution,department,phone,address,bio,rekening_no,rekening_name,bank_name,cv_file,rekening_file) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
        ON DUPLICATE KEY UPDATE full_name_with_title=VALUES(full_name_with_title),full_name_without_title=VALUES(full_name_without_title),avatar_url=VALUES(avatar_url),gender=VALUES(gender),nik=VALUES(nik),nidn=VALUES(nidn),birthplace=VALUES(birthplace),birthdate=VALUES(birthdate),unit_kerja=VALUES(unit_kerja),province=VALUES(province),city=VALUES(city),employee_status=VALUES(employee_status),sk_file=VALUES(sk_file),tmt_sk_dosen=VALUES(tmt_sk_dosen),functional_title=VALUES(functional_title),functional_title_file=VALUES(functional_title_file),diploma_file=VALUES(diploma_file),golongan=VALUES(golongan),npwp=VALUES(npwp),nip=VALUES(nip),nuptk=VALUES(nuptk),institution=VALUES(institution),department=VALUES(department),phone=VALUES(phone),address=VALUES(address),bio=VALUES(bio),rekening_no=VALUES(rekening_no),rekening_name=VALUES(rekening_name),bank_name=VALUES(bank_name),cv_file=VALUES(cv_file),rekening_file=VALUES(rekening_file)`,
-      [req.user.id,full_name_with_title||null,full_name_without_title||null,avatar_url,gender,nik,nidn,birthplace,birthdate,unit_kerja,province,city,employee_status,sk_file,normalizedTmtSkDosen,functional_title,functional_title_file,diploma_file,golongan,npwp,nip,nuptk,institution,department,phone,address,bio,rekening_no||null,rekening_name||null,bank_name||null,cv_file||null,rekening_file||null]);
+      [req.user.id,full_name_with_title||null,full_name_without_title||null,avatar_url,gender,nik,nidn,birthplace,normalizedBirthdate,unit_kerja,province,city,employee_status,sk_file,normalizedTmtSkDosen,functional_title,functional_title_file,diploma_file,golongan,npwp,nip,nuptk,institution,department,phone,address,bio,rekening_no||null,rekening_name||null,bank_name||null,cv_file||null,rekening_file||null]);
 
     // Update user name/email if provided
     const userUpdates=[],userParams=[];
