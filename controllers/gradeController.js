@@ -144,7 +144,7 @@ const buildParticipantRecapData=async({period_id,phase,class_id})=>{
                     LEFT JOIN profiles pr ON pr.user_id=u.id
                     LEFT JOIN class_members cm ON cm.user_id=u.id
                     LEFT JOIN classes c ON c.id=cm.class_id
-                    WHERE u.role='DOSEN' AND u.period_id=?`;
+                    WHERE u.role='DOSEN' AND u.period_id=? AND u.payment_status='verified'`;
   const pParams=[period_id];
   if(class_id){participantQ+=' AND c.id=?';pParams.push(class_id);}
   if(phase){participantQ+=' AND (c.phase=? OR c.phase IS NULL OR c.phase="")';pParams.push(phase);}
@@ -712,7 +712,7 @@ exports.allSummary=async(req,res,next)=>{
                        pr.nidn,pr.nip,pr.institution,pr.unit_kerja,pr.avatar_url
                 FROM users u LEFT JOIN periods p ON p.id=u.period_id
                 LEFT JOIN profiles pr ON pr.user_id=u.id
-                WHERE u.role='DOSEN'`;
+                WHERE u.role='DOSEN' AND u.payment_status='verified'`;
     const dosenParams=[];
     if(period_id){dosenQ+=' AND u.period_id=?';dosenParams.push(period_id);}
     dosenQ+=' ORDER BY u.name';
