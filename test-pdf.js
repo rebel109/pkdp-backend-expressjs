@@ -64,6 +64,7 @@ const fs = require('fs');
             <span class="class-count">${participants.length} peserta</span>
           </div>
           <table>
+            <colgroup><col><col><col></colgroup>
             <thead><tr><th class="no">No</th><th>NIDN/NUPTK</th><th>Nama Peserta</th></tr></thead>
             <tbody>${body}</tbody>
           </table>
@@ -82,46 +83,50 @@ const fs = require('fs');
   <meta charset="utf-8"/>
   <title>Daftar Kelas Peserta PKDP</title>
   <style>
-    @page{size:A4;margin:12mm 10mm}
+    @page{size:A4;margin:8mm 6mm}
     *{box-sizing:border-box}
-    body{font-family:Arial,sans-serif;color:#172033;margin:0;font-size:10px;background:#fff}
+    body{font-family:Arial,sans-serif;color:#172033;margin:0;font-size:14pt;background:#fff}
 
-    .sheet{border:1px solid #d7e3f4;border-radius:18px;overflow:hidden;box-shadow:0 12px 32px rgba(30,64,175,.08)}
-    .header{padding:16px 20px;background:linear-gradient(135deg,#123f5c 0%,#0f5f8f 52%,#1db6e7 100%);color:#fff;position:relative}
+    .sheet{border:1px solid #d7e3f4;border-radius:12px;overflow:hidden;box-shadow:0 12px 32px rgba(30,64,175,.08)}
+    .header{padding:8px 12px;background:linear-gradient(135deg,#123f5c 0%,#0f5f8f 52%,#1db6e7 100%);color:#fff;position:relative}
     .header:after{content:"";position:absolute;right:-42px;top:-50px;width:180px;height:180px;border-radius:50%;background:rgba(255,255,255,.18)}
-    .eyebrow{font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.16em;opacity:.9;margin-bottom:5px}
-    h1{font-size:19px;margin:0 0 5px;text-transform:uppercase;letter-spacing:.03em;line-height:1.2}
-    .subtitle{font-size:10px;opacity:.92;max-width:680px;line-height:1.4;margin:0}
-    .meta{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:10px 14px;background:#f7fbff;border-bottom:1px solid #d7e3f4}
-    .meta-card{padding:7px 10px;border:1px solid #dbeafe;border-radius:10px;background:#fff}
-    .meta-label{font-size:7px;color:#64748b;text-transform:uppercase;letter-spacing:.08em;font-weight:800;margin-bottom:3px}
-    .meta-value{font-size:11px;color:#0f172a;font-weight:700;line-height:1.3}
+    .eyebrow{font-size:7pt;font-weight:800;text-transform:uppercase;letter-spacing:.16em;opacity:.9;margin-bottom:2px}
+    h1{font-size:13pt;margin:0 0 2px;text-transform:uppercase;letter-spacing:.03em;line-height:1.1}
+    .subtitle{font-size:7pt;opacity:.92;max-width:680px;line-height:1.2;margin:0}
+    .meta{display:grid;grid-template-columns:repeat(3,1fr);gap:3px;padding:4px 8px;background:#f7fbff;border-bottom:1px solid #d7e3f4}
+    .meta-card{padding:2px 5px;border:1px solid #dbeafe;border-radius:6px;background:#fff}
+    .meta-label{font-size:5.5pt;color:#64748b;text-transform:uppercase;letter-spacing:.08em;font-weight:800;margin-bottom:1px}
+    .meta-value{font-size:8pt;color:#0f172a;font-weight:700;line-height:1.1}
 
-    .content{padding:8px 14px}
+    .content{padding:2px 8px}
 
     /* ANGKATAN */
     .angkatan-wrapper{margin-bottom:0}
-    .angkatan-title{font-size:14px;font-weight:800;color:#0f172a;margin:2px 0 6px;padding:4px 0;border-bottom:3px solid #0f5f8f}
+    .angkatan-title{font-size:11pt;font-weight:800;color:#0f172a;margin:1px 0 2px;padding:2px 0 2px 0;border-bottom:2px solid #0f5f8f}
 
     /* CLASS CARD */
-    .class-card{margin-bottom:5px;page-break-inside:avoid}
-    .class-head{display:flex;align-items:center;gap:6px;margin-bottom:3px;flex-wrap:wrap}
-    .phase-badge{display:inline-block;font-size:8px;font-weight:800;color:#fff;padding:1px 7px;border-radius:3px;letter-spacing:.04em}
-    .class-name{font-size:11px;font-weight:700;color:#0f172a}
-    .class-count{font-size:8px;color:#64748b;margin-left:auto}
+    .class-card{border:1px solid #e2e8f0;border-radius:4px;margin-bottom:2px;page-break-inside:avoid;background:#fff}
+    .class-head{display:flex;align-items:center;gap:4px;padding:1px 5px;background:#f8fafc;border-bottom:1px solid #e2e8f0;border-radius:3px 3px 0 0}
+    .phase-badge{display:inline-block;font-size:6pt;font-weight:800;color:#fff;padding:0 5px;border-radius:2px;letter-spacing:.06em;text-transform:uppercase}
+    .class-name{font-size:9pt;font-weight:700;color:#0f172a}
+    .class-count{font-size:6pt;color:#64748b;margin-left:auto;background:#eef2ff;padding:0 5px;border-radius:6px;font-weight:600}
 
     /* TABLE */
-    table{width:100%;border-collapse:separate;border-spacing:0;border:1px solid #cbd5e1;border-radius:8px;overflow:hidden}
-    th,td{padding:3px 6px;vertical-align:top;line-height:1.25;border-right:1px solid #e2e8f0;border-bottom:1px solid #e2e8f0}
-    th:last-child,td:last-child{border-right:0}
+    table{width:100%;table-layout:fixed;border-collapse:separate;border-spacing:0}
+    th,td{padding:1px 3px;vertical-align:top;line-height:1.1;border-bottom:1px solid #e2e8f0;border-right:1px solid #e2e8f0;font-size:14pt}
+    td:last-child{border-right:0}
+    th:last-child{border-right:0}
     tbody tr:last-child td{border-bottom:0}
-    th{background:#0f5f8f;color:#fff;text-align:left;font-weight:700;font-size:7px;text-transform:uppercase;letter-spacing:.04em}
+    colgroup col:nth-child(1){width:16px}
+    colgroup col:nth-child(2){width:26%}
+    colgroup col:nth-child(3){width:auto}
+    th{background:#0f5f8f;color:#fff;text-align:left;font-weight:700;font-size:7pt;text-transform:uppercase;letter-spacing:.04em}
     tbody tr:nth-child(even){background:#f8fafc}
-    .no{width:24px;text-align:center;font-weight:700;color:#0f5f8f;font-size:9px}
+    .no{width:16px;text-align:center;font-weight:700;color:#0f5f8f;font-size:14pt}
     th.no{color:#fff;text-align:center}
 
     /* FOOTER */
-    .footer{padding:6px 14px;background:#f8fafc;color:#64748b;font-size:8px;border-top:1px solid #e2e8f0;display:flex;justify-content:space-between;gap:10px}
+    .footer{padding:2px 8px;background:#f8fafc;color:#64748b;font-size:6pt;border-top:1px solid #e2e8f0;display:flex;justify-content:space-between;gap:6px}
   </style>
 </head>
 <body>
