@@ -289,7 +289,7 @@ const buildParticipantsPdfHtml=({rows,periodLabel,generatedAt})=>{
   <style>
     @page{size:A4;margin:8mm 6mm}
     *{box-sizing:border-box}
-    body{font-family:Arial,sans-serif;color:#172033;margin:0;font-size:14pt;background:#fff}
+    body{font-family:Arial,sans-serif;color:#172033;margin:0;font-size:11pt;background:#fff}
 
     .sheet{border:1px solid #d7e3f4;border-radius:12px;overflow:hidden;box-shadow:0 12px 32px rgba(30,64,175,.08)}
     .header{padding:8px 12px;background:linear-gradient(135deg,#123f5c 0%,#0f5f8f 52%,#1db6e7 100%);color:#fff;position:relative}
@@ -317,7 +317,7 @@ const buildParticipantsPdfHtml=({rows,periodLabel,generatedAt})=>{
 
     /* TABLE */
     table{width:100%;table-layout:fixed;border-collapse:separate;border-spacing:0}
-    th,td{padding:1px 3px;vertical-align:top;line-height:1.1;border-bottom:1px solid #e2e8f0;border-right:1px solid #e2e8f0;font-size:14pt}
+    th,td{padding:1px 3px;vertical-align:top;line-height:1.1;border-bottom:1px solid #e2e8f0;border-right:1px solid #e2e8f0;font-size:11pt}
     td:last-child{border-right:0}
     th:last-child{border-right:0}
     tbody tr:last-child td{border-bottom:0}
@@ -326,7 +326,7 @@ const buildParticipantsPdfHtml=({rows,periodLabel,generatedAt})=>{
     colgroup col:nth-child(3){width:auto}
     th{background:#0f5f8f;color:#fff;text-align:left;font-weight:700;font-size:7pt;text-transform:uppercase;letter-spacing:.04em}
     tbody tr:nth-child(even){background:#f8fafc}
-    .no{width:16px;text-align:center;font-weight:700;color:#0f5f8f;font-size:14pt}
+    .no{width:16px;text-align:center;font-weight:700;color:#0f5f8f;font-size:11pt}
     th.no{color:#fff;text-align:center}
 
     /* FOOTER */
