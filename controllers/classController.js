@@ -204,9 +204,6 @@ exports.getAll=async(req,res,next)=>{
 };
 
 const getParticipantClassRows=async({periodId})=>{
-  const params=[];
-  let where='WHERE u.role=\'DOSEN\'';
-  if(periodId){where+=' AND c.period_id=?';params.push(periodId);}
   const[rows]=await db.query(
     `SELECT c.id AS class_id,c.name AS class_name,c.phase AS class_phase,c.period_id,
             p.label AS period_label,p.year AS period_year,co.id AS cohort_id,co.cohort_no,co.ojc_mode,
@@ -217,93 +214,111 @@ const getParticipantClassRows=async({periodId})=>{
      LEFT JOIN profiles pr ON pr.user_id=u.id
      LEFT JOIN periods p ON p.id=c.period_id
      LEFT JOIN cohorts co ON co.id=c.cohort_id
-     ${where}
-     ORDER BY COALESCE(co.cohort_no,9999),FIELD(c.phase,'ISC1','OJC','ISC2'),c.name,u.name`,
-    params
+     WHERE u.role='DOSEN' AND c.period_id=?
+     ORDER BY FIELD(c.phase,'ISC1','OJC','ISC2'),COALESCE(co.cohort_no,9999),c.name,u.name`,
+    [periodId]
   );
   return rows;
 };
 
 const buildParticipantsPdfHtml=({rows,periodLabel,generatedAt})=>{
-  const cohortMap=new Map();
+  const phaseData={ISC1:{},OJC:{},ISC2:{}};
+
   rows.forEach(row=>{
-    const cohortKey=row.cohort_id||'none';
-    if(!cohortMap.has(cohortKey)) cohortMap.set(cohortKey,{label:row.cohort_no?`Angkatan ${row.cohort_no}`:'Tanpa Angkatan',ojc_mode:row.ojc_mode,classes:new Map()});
-    const cohort=cohortMap.get(cohortKey);
-    const classKey=row.class_id;
-    if(!cohort.classes.has(classKey)) cohort.classes.set(classKey,{name:row.class_name,phase:row.class_phase,rows:[]});
-    cohort.classes.get(classKey).rows.push(row);
+    const phase=row.class_phase||'ISC1';
+    const cohortNo=row.cohort_no||0;
+
+    if(!phaseData[phase]) phaseData[phase]={};
+    if(!phaseData[phase][cohortNo]) phaseData[phase][cohortNo]={cohort_no:cohortNo,classes:{}};
+
+    const className=row.class_name||'ISC1';
+    if(!phaseData[phase][cohortNo].classes[className]) phaseData[phase][cohortNo].classes[className]=[];
+    phaseData[phase][cohortNo].classes[className].push(row);
   });
 
   const totalParticipants=new Set(rows.map(r=>r.user_id)).size;
-  const totalCohorts=cohortMap.size;
-  const content=[...cohortMap.values()].map(cohort=>{
-    const participantMap=new Map();
-    [...cohort.classes.values()].forEach(cls=>cls.rows.forEach(row=>{
-      if(!participantMap.has(row.user_id)) participantMap.set(row.user_id,row);
-    }));
-    const isc1Rows=[...participantMap.values()].sort((a,b)=>String(a.name||'').localeCompare(String(b.name||'')));
-    const isc1Body=isc1Rows.map((r,i)=>`<tr><td class="no">${i+1}</td><td>${esc(r.identity_no||'—')}</td><td class="name-cell">${esc(r.name||'—')}</td><td>ISC1</td></tr>`).join('');
-    const isc1Html=`<section class="class-block"><div class="table-title"><strong>ISC1</strong><span>${isc1Rows.length} peserta</span></div><table><thead><tr><th class="no">No</th><th class="identity">NIDN/NUPTK</th><th class="name">Nama Peserta</th><th>Kelas</th></tr></thead><tbody>${isc1Body}</tbody></table></section>`;
-    const classesHtml=[...cohort.classes.values()].map(cls=>{
-      const body=cls.rows.map((r,i)=>`<tr><td class="no">${i+1}</td><td>${esc(r.identity_no||'—')}</td><td class="name-cell">${esc(r.name||'—')}</td><td>${esc(cls.name)}${cls.phase?` — ${esc(cls.phase)}`:''}</td></tr>`).join('');
-      return `<section class="class-block"><div class="table-title"><strong>${esc(cls.name)}${cls.phase?` — ${esc(cls.phase)}`:''}</strong><span>${cls.rows.length} peserta</span></div><table><thead><tr><th class="no">No</th><th class="identity">NIDN/NUPTK</th><th class="name">Nama Peserta</th><th>Kelas</th></tr></thead><tbody>${body}</tbody></table></section>`;
+  const totalCohorts=new Set(rows.map(r=>r.cohort_no).filter(Boolean)).size;
+
+  let isFirstCohort=true;
+
+  const phaseSections=Object.keys(phaseData).map(phase=>{
+    const cohorts=phaseData[phase];
+    if(!Object.keys(cohorts).length) return '';
+
+    const cohortHtml=Object.keys(cohorts).sort((a,b)=>Number(a)-Number(b)).map(cohortNo=>{
+      const cohort=cohorts[cohortNo];
+      const cohortLabel=cohortNo?`Angkatan ${cohortNo}`:'Tanpa Angkatan';
+      const pageBreakStyle=isFirstCohort?'':'page-break-before:always;page-break-inside:avoid;';
+      isFirstCohort=false;
+
+      const classHtml=Object.keys(cohort.classes).map(className=>{
+        const participants=cohort.classes[className];
+        const body=participants.map((r,i)=>`<tr><td class="no">${i+1}</td><td>${esc(r.identity_no||'—')}</td><td>${esc(r.name||'—')}</td></tr>`).join('');
+        return `<div class="class-section"><div class="class-title"><strong>${esc(className)}</strong><span>${participants.length} peserta</span></div><table><thead><tr><th class="no">No</th><th>NIDN/NUPTK</th><th>Nama Peserta</th></tr></thead><tbody>${body}</tbody></table></div>`;
+      }).join('');
+
+      return `<div class="cohort-section" style="${pageBreakStyle}"><div class="cohort-header">${esc(cohortLabel)}</div>${classHtml}</div>`;
     }).join('');
-    return `<section class="cohort"><div class="cohort-title">${esc(cohort.label)}</div>${isc1Html}${classesHtml}</section>`;
+
+    return `<div class="phase-section"><div class="phase-header">${phase}</div>${cohortHtml}</div>`;
   }).join('');
 
-  return `<!doctype html><html><head><meta charset="utf-8"/>
-    <style>
-      @page{size:A4;margin:14mm 12mm}
-      *{box-sizing:border-box}
-      body{font-family:Arial,sans-serif;color:#172033;margin:0;font-size:12px;background:#fff}
-      .sheet{border:1px solid #d7e3f4;border-radius:18px;overflow:hidden;box-shadow:0 12px 32px rgba(30,64,175,.08)}
-      .header{padding:22px 26px;background:linear-gradient(135deg,#0f5f8f 0%,#1db6e7 55%,#dff7ff 100%);color:#fff;position:relative}
-      .header:after{content:"";position:absolute;right:-42px;top:-50px;width:180px;height:180px;border-radius:50%;background:rgba(255,255,255,.18)}
-      .eyebrow{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.16em;opacity:.9;margin-bottom:7px}
-      h1{font-size:22px;margin:0 0 7px;text-transform:uppercase;letter-spacing:.03em;line-height:1.2}
-      .subtitle{font-size:12px;opacity:.92;max-width:560px;line-height:1.5}
-      .meta{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;padding:14px 18px;background:#f7fbff;border-bottom:1px solid #d7e3f4}
-      .meta-card{padding:10px 12px;border:1px solid #dbeafe;border-radius:12px;background:#fff}
-      .meta-label{font-size:9px;color:#64748b;text-transform:uppercase;letter-spacing:.08em;font-weight:800;margin-bottom:4px}
-      .meta-value{font-size:11px;color:#0f172a;font-weight:700;line-height:1.35}
-      .content{padding:18px}
-      .cohort{break-inside:avoid;margin-bottom:18px}
-      .cohort-title{font-size:15px;font-weight:800;color:#0f5f8f;margin:0 0 10px;padding:9px 12px;border:1px solid #dbeafe;border-radius:12px;background:#f0f9ff}
-      .cohort-title span{font-size:10px;color:#64748b;font-weight:700;margin-left:6px}
-      .class-block{break-inside:avoid;margin-bottom:14px}
-      .table-title{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;color:#334155;font-size:11px}
-      .table-title strong{font-size:13px;color:#0f172a}
-      table{width:100%;border-collapse:separate;border-spacing:0;border:1px solid #cbd5e1;border-radius:12px;overflow:hidden}
-      th,td{padding:10px 11px;vertical-align:top;line-height:1.4;border-right:1px solid #e2e8f0;border-bottom:1px solid #e2e8f0}
-      th:last-child,td:last-child{border-right:0}
-      tbody tr:last-child td{border-bottom:0}
-      th{background:#123f5c;color:#fff;text-align:left;font-weight:800;font-size:11px;text-transform:uppercase;letter-spacing:.04em}
-      tbody tr:nth-child(even){background:#f8fafc}
-      tbody tr:nth-child(odd){background:#fff}
-      .no{width:44px;text-align:center;font-weight:700;color:#0f5f8f}
-      th.no{color:#fff;text-align:center}
-      .identity{width:132px}
-      .name{width:230px}
-      .name-cell{font-weight:600;color:#0f172a}
-      .empty{padding:26px;border:1px dashed #cbd5e1;border-radius:14px;text-align:center;color:#64748b;background:#f8fafc}
-      .footer{padding:11px 18px;background:#f8fafc;color:#64748b;font-size:10px;border-top:1px solid #e2e8f0;display:flex;justify-content:space-between;gap:10px}
-    </style></head><body>
-    <div class="sheet">
-      <div class="header">
-        <div class="eyebrow">Daftar Kelas PKDP</div>
-        <h1>Daftar Kelas Peserta</h1>
-        <div class="subtitle">Daftar peserta yang sudah masuk ke kelas masing-masing, dikelompokkan berdasarkan angkatan dan kelas.</div>
-      </div>
-      <div class="meta">
-        <div class="meta-card"><div class="meta-label">Periode</div><div class="meta-value">${esc(periodLabel)}</div></div>
-        <div class="meta-card"><div class="meta-label">Total Peserta</div><div class="meta-value">${totalParticipants}</div></div>
-        <div class="meta-card"><div class="meta-label">Total Angkatan</div><div class="meta-value">${totalCohorts}</div></div>
-      </div>
-      <div class="content">${content||'<div class="empty">Belum ada peserta yang masuk kelas pada periode ini.</div>'}</div>
-      <div class="footer"><span>Dicetak dari Sistem PKDP</span><span>${esc(generatedAt)}</span></div>
+  return `<!doctype html>
+<html>
+<head>
+  <title>Daftar Kelas Peserta</title>
+  <style>
+    @page{size:A4;margin:12mm 10mm}
+    *{box-sizing:border-box}
+    body{font-family:Arial,sans-serif;color:#172033;margin:0;font-size:10px;background:#fff}
+    .sheet{border:1px solid #d7e3f4;border-radius:8px;overflow:hidden;box-shadow:none}
+    .header{padding:12px 14px;background:linear-gradient(135deg,#1d4ed8 0%,#38bdf8 55%,#dbeafe 100%);color:#fff;position:relative}
+    .header:after{content:"";position:absolute;right:-32px;top:-40px;width:140px;height:140px;border-radius:50%;background:rgba(255,255,255,.15)}
+    .eyebrow{font-size:8px;font-weight:800;text-transform:uppercase;letter-spacing:.12em;opacity:.9;margin-bottom:2px}
+    h1{font-size:16px;margin:0 0 2px;text-transform:uppercase;letter-spacing:.02em;line-height:1}
+    .subtitle{font-size:9px;opacity:.9;max-width:560px;line-height:1.2;margin:0}
+    .meta{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;padding:8px 10px;background:#f7fbff;border-bottom:1px solid #d7e3f4}
+    .meta-card{padding:5px 7px;border:1px solid #dbeafe;border-radius:6px;background:#fff}
+    .meta-label{font-size:7px;color:#64748b;text-transform:uppercase;letter-spacing:.06em;font-weight:800;margin-bottom:1px}
+    .meta-value{font-size:10px;color:#0f172a;font-weight:700;line-height:1.2}
+    .content{padding:8px 10px}
+    .phase-section{margin-bottom:0}
+    .phase-header{font-size:12px;font-weight:800;color:#0f172a;margin-bottom:6px;padding-bottom:3px;border-bottom:2px solid #1d4ed8}
+    .cohort-section{margin-bottom:0;padding-top:2px}
+    .cohort-header{font-size:11px;font-weight:700;color:#0f172a;margin-bottom:4px;padding:3px 0;border-left:3px solid #1d4ed8;padding-left:6px}
+    .class-section{margin-bottom:5px;break-inside:avoid}
+    .class-title{display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;color:#334155;font-size:9px}
+    .class-title strong{font-size:10px;color:#0f172a;font-weight:700}
+    .class-title span{font-size:8px;color:#64748b}
+    table{width:100%;border-collapse:separate;border-spacing:0;border:1px solid #cbd5e1;border-radius:6px;overflow:hidden}
+    th,td{padding:4px 7px;vertical-align:top;line-height:1.3;border-right:1px solid #e2e8f0;border-bottom:1px solid #e2e8f0}
+    th:last-child,td:last-child{border-right:0}
+    tbody tr:last-child td{border-bottom:0}
+    th{background:#1e3a8a;color:#fff;text-align:left;font-weight:700;font-size:8px;text-transform:uppercase;letter-spacing:.02em}
+    tbody tr:nth-child(even){background:#f8fafc}
+    tbody tr:nth-child(odd){background:#fff}
+    .no{width:28px;text-align:center;font-weight:700;color:#1d4ed8;font-size:9px}
+    th.no{color:#fff;text-align:center}
+    .footer{padding:5px 10px;background:#f8fafc;color:#64748b;font-size:7px;border-top:1px solid #e2e8f0;display:flex;justify-content:space-between;gap:8px}
+  </style>
+</head>
+<body>
+  <div class="sheet">
+    <div class="header">
+      <div class="eyebrow">Daftar Kelas PKDP</div>
+      <h1>Daftar Kelas Peserta</h1>
+      <div class="subtitle">Peserta dikelompokkan per fase dan angkatan.</div>
     </div>
-  </body></html>`;
+    <div class="meta">
+      <div class="meta-card"><div class="meta-label">Periode</div><div class="meta-value">${esc(periodLabel)}</div></div>
+      <div class="meta-card"><div class="meta-label">Total Peserta</div><div class="meta-value">${totalParticipants}</div></div>
+      <div class="meta-card"><div class="meta-label">Total Angkatan</div><div class="meta-value">${totalCohorts}</div></div>
+    </div>
+    <div class="content">${phaseSections||'<div>Belum ada peserta yang masuk kelas pada periode ini.</div>'}</div>
+    <div class="footer"><span>Dicetak dari Sistem PKDP</span><span>${esc(generatedAt)}</span></div>
+  </div>
+</body>
+</html>`;
 };
 
 exports.exportParticipantsPdf=async(req,res,next)=>{
@@ -319,7 +334,7 @@ exports.exportParticipantsPdf=async(req,res,next)=>{
     try{
       const page=await browser.newPage();
       await page.setContent(html,{waitUntil:'networkidle0'});
-      const pdf=await page.pdf({format:'A4',printBackground:true,margin:{top:'14mm',right:'12mm',bottom:'14mm',left:'12mm'}});
+      const pdf=await page.pdf({format:'A4',printBackground:true,margin:{top:'12mm',right:'10mm',bottom:'12mm',left:'10mm'}});
       res.setHeader('Content-Type','application/pdf');
       res.setHeader('Content-Disposition','attachment; filename="daftar-kelas-peserta.pdf"');
       res.send(Buffer.from(pdf));
@@ -536,9 +551,11 @@ exports.generateCohortClasses=async(req,res,next)=>{
       await conn.beginTransaction();
       const [cIns]=await conn.query('INSERT INTO cohorts (period_id,cohort_no,ojc_mode,created_by) VALUES (?,?,?,?)',[period_id,cohort_no,ojc_mode,req.user.id]);
       const cohortId=cIns.insertId;
+      const isc1Names=[`ISC1`];
       const ojcNames=ojc_mode==='4x10'?[`${cohort_no}A`,`${cohort_no}B`,`${cohort_no}C`,`${cohort_no}D`]:[`${cohort_no}A`,`${cohort_no}B`];
       const isc2Names=[`${cohort_no}A`,`${cohort_no}B`];
       const classIds=[];
+      for(const n of isc1Names){ const [r]=await conn.query('INSERT INTO classes (period_id,cohort_id,name,phase,description) VALUES (?,?,?,?,?)',[period_id,cohortId,n,'ISC1',`Auto angkatan ${cohort_no}`]); classIds.push({id:r.insertId,phase:'ISC1'}); }
       for(const n of ojcNames){ const [r]=await conn.query('INSERT INTO classes (period_id,cohort_id,name,phase,description) VALUES (?,?,?,?,?)',[period_id,cohortId,n,'OJC',`Auto angkatan ${cohort_no}`]); classIds.push({id:r.insertId,phase:'OJC'}); }
       for(const n of isc2Names){ const [r]=await conn.query('INSERT INTO classes (period_id,cohort_id,name,phase,description) VALUES (?,?,?,?,?)',[period_id,cohortId,n,'ISC2',`Auto angkatan ${cohort_no}`]); classIds.push({id:r.insertId,phase:'ISC2'}); }
       const capacity=40;
@@ -548,6 +565,10 @@ exports.generateCohortClasses=async(req,res,next)=>{
         WHERE u.role='DOSEN'
           AND u.period_id=?
           AND u.status='active'
+          AND EXISTS (
+            SELECT 1 FROM payment_submissions ps
+            WHERE ps.user_id=u.id AND ps.period_id=? AND ps.status='verified'
+          )
           AND NOT EXISTS (
             SELECT 1
             FROM class_members cm
@@ -558,7 +579,7 @@ exports.generateCohortClasses=async(req,res,next)=>{
           )
         ORDER BY u.id
         LIMIT ?
-      `,[period_id,capacity]);
+      `,[period_id,period_id,capacity]);
       const distribute=async(phase,names)=>{
         const target=classIds.filter(c=>c.phase===phase).map(c=>c.id);
         if(!target.length||!dosen.length) return;
@@ -567,7 +588,7 @@ exports.generateCohortClasses=async(req,res,next)=>{
           await conn.query('INSERT IGNORE INTO class_members (class_id,user_id) VALUES (?,?)',[target[idx%target.length],u.id]);
         }
       };
-      await distribute('OJC',ojcNames); await distribute('ISC2',isc2Names);
+      await distribute('ISC1',isc1Names); await distribute('OJC',ojcNames); await distribute('ISC2',isc2Names);
       await conn.commit();
       res.status(201).json({message:'Cohort dan kelas berhasil digenerate',cohort_id:cohortId});
     }catch(e){ await conn.rollback(); throw e; } finally { conn.release(); }
