@@ -309,11 +309,11 @@ const buildParticipantsPdfHtml=({rows,periodLabel,generatedAt})=>{
     .angkatan-title{font-size:11pt;font-weight:800;color:#0f172a;margin:1px 0 2px;padding:2px 0 2px 0;border-bottom:2px solid #0f5f8f}
 
     /* CLASS CARD */
-    .class-card{border:1px solid #e2e8f0;border-radius:4px;margin-bottom:2px;page-break-inside:avoid;background:#fff}
-    .class-head{display:flex;align-items:center;gap:4px;padding:1px 5px;background:#f8fafc;border-bottom:1px solid #e2e8f0;border-radius:3px 3px 0 0}
-    .phase-badge{display:inline-block;font-size:6pt;font-weight:800;color:#fff;padding:0 5px;border-radius:2px;letter-spacing:.06em;text-transform:uppercase}
-    .class-name{font-size:9pt;font-weight:700;color:#0f172a}
-    .class-count{font-size:6pt;color:#64748b;margin-left:auto;background:#eef2ff;padding:0 5px;border-radius:6px;font-weight:600}
+    .class-card{border:1px solid #cbd5e1;border-radius:5px;margin-bottom:3px;page-break-inside:avoid;background:#fff}
+    .class-head{display:flex;align-items:center;gap:6px;padding:3px 6px;background:#f1f5f9;border-bottom:1px solid #cbd5e1;border-radius:4px 4px 0 0}
+    .phase-badge{display:inline-block;font-size:8pt;font-weight:800;color:#fff;padding:2px 8px;border-radius:4px;letter-spacing:.06em;text-transform:uppercase}
+    .class-name{font-size:10pt;font-weight:700;color:#0f172a}
+    .class-count{font-size:8pt;color:#1e40af;margin-left:auto;background:#dbeafe;padding:1px 8px;border-radius:10px;font-weight:700}
 
     /* TABLE */
     table{width:100%;table-layout:fixed;border-collapse:separate;border-spacing:0}
