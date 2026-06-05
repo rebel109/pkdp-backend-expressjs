@@ -207,7 +207,8 @@ const getParticipantClassRows=async({periodId})=>{
   const[rows]=await db.query(
     `SELECT c.id AS class_id,c.name AS class_name,c.phase AS class_phase,c.period_id,
             p.label AS period_label,p.year AS period_year,co.id AS cohort_id,co.cohort_no,co.ojc_mode,
-            u.id AS user_id,u.name,COALESCE(NULLIF(pr.nidn,''),NULLIF(pr.nuptk,''),'—') AS identity_no
+            u.id AS user_id,u.name,COALESCE(NULLIF(pr.nidn,''),NULLIF(pr.nuptk,''),'—') AS identity_no,
+            pr.nidn,pr.nuptk
      FROM class_members cm
      JOIN classes c ON c.id=cm.class_id
      JOIN users u ON u.id=cm.user_id
@@ -260,7 +261,12 @@ const buildParticipantsPdfHtml=({rows,periodLabel,generatedAt})=>{
     }
 
     const classHtml=allClasses.map(({phase,className,participants,color})=>{
-      const body=participants.map((r,j)=>`<tr><td class="no">${j+1}</td><td>${esc(r.identity_no||'—')}</td><td>${esc(r.name||'—')}</td></tr>`).join('');
+      const body=participants.map((r,j)=>{
+        const nidnValid=r.nidn&&String(r.nidn).trim()&&!['-','0'].includes(String(r.nidn).trim());
+        const nuptkValid=r.nuptk&&String(r.nuptk).trim()&&!['-','0'].includes(String(r.nuptk).trim());
+        const identity=nidnValid?String(r.nidn).trim():nuptkValid?String(r.nuptk).trim():(r.identity_no!=='—'?r.identity_no:'—');
+        return `<tr><td class="no">${j+1}</td><td>${esc(identity)}</td><td>${esc(r.name||'—')}</td></tr>`;
+      }).join('');
       return `<div class="class-card">
         <div class="class-head">
           <span class="phase-badge" style="background:${color}">${phaseLabels[phase]}</span>
