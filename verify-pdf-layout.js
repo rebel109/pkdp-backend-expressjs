@@ -26,60 +26,38 @@ const path = require('path');
     console.log(`PDF saved: ${pdfPath}`);
 
     // Analyze first page content
-    // Check if first page has the header AND Angkatan 1
     const firstPageContent = await page.evaluate(() => {
-      // Get all cohort sections
-      const cohorts = document.querySelectorAll('.cohort-section');
-      const classes = document.querySelectorAll('.class-section');
-      const sheet = document.querySelector('.sheet');
-
-      // Measure the header + meta + first cohort combined
       const headerEl = document.querySelector('.header');
-      const metaEl = document.querySelector('.meta');
-      const firstCohort = document.querySelector('.cohort-section');
-      const firstPhase = document.querySelector('.phase-header');
-
-      const getTotalHeight = (els) => {
-        if (!els.length) return 0;
-        const first = els[0];
-        const last = els[els.length - 1];
-        return last.offsetTop + last.offsetHeight - first.offsetTop;
-      };
+      const firstAngkatan = document.querySelector('.angkatan-wrapper');
+      const angkatanBlocks = document.querySelectorAll('.angkatan-wrapper');
 
       let headerEnd = 0;
       if (headerEl) headerEnd = headerEl.offsetTop + headerEl.offsetHeight;
-      let metaEnd = 0;
-      if (metaEl) metaEnd = metaEl.offsetTop + metaEl.offsetHeight;
 
-      let firstCohortEnd = 0;
-      if (firstCohort) firstCohortEnd = firstCohort.offsetTop + firstCohort.offsetHeight;
+      let firstAngkatanEnd = 0;
+      let firstAngkatanText = 'N/A';
+      if (firstAngkatan) {
+        firstAngkatanEnd = firstAngkatan.offsetTop + firstAngkatan.offsetHeight;
+        firstAngkatanText = firstAngkatan.innerText.substring(0, 80);
+      }
 
-      let firstPhaseEnd = 0;
-      if (firstPhase) firstPhaseEnd = firstPhase.offsetTop + firstPhase.offsetHeight;
-
-      const pageContentHeight = 1123; // A4 at 96dpi with margins
+      const pageContentHeight = 1123;
 
       return {
         headerEnd,
-        metaEnd,
-        firstPhaseEnd,
-        firstCohortEnd,
-        firstCohortText: firstCohort ? firstCohort.innerText.substring(0, 60) : 'N/A',
-        cohortCount: cohorts.length,
-        classCount: classes.length,
-        firstCohortFitsOnPage1: firstCohortEnd <= pageContentHeight,
-        firstCohortOffsetTop: firstCohort ? firstCohort.offsetTop : 0,
+        firstAngkatanEnd,
+        firstAngkatanText,
+        angkatanCount: angkatanBlocks.length,
+        firstAngkatanFitsOnPage1: firstAngkatanEnd <= pageContentHeight,
       };
     });
 
     console.log(`\n=== First Page Analysis ===`);
     console.log(`Header ends at: ${firstPageContent.headerEnd}px`);
-    console.log(`Meta ends at: ${firstPageContent.metaEnd}px`);
-    console.log(`Phase header ends at: ${firstPageContent.firstPhaseEnd}px`);
-    console.log(`First cohort ends at: ${firstPageContent.firstCohortEnd}px`);
-    console.log(`First cohort: ${firstPageContent.firstCohortText}`);
-    console.log(`\n✅ Header + Angkatan 1 di halaman 1: ${firstPageContent.firstCohortFitsOnPage1 ? 'YA' : 'TIDAK'}`);
-    console.log(`Total cohort sections: ${firstPageContent.cohortCount}`);
+    console.log(`First angkatan ends at: ${firstPageContent.firstAngkatanEnd}px`);
+    console.log(`First angkatan preview: ${firstPageContent.firstAngkatanText}`);
+    console.log(`\n✅ Header + Angkatan 1 di halaman 1: ${firstPageContent.firstAngkatanFitsOnPage1 ? 'YA' : 'TIDAK'}`);
+    console.log(`Total angkatan blocks: ${firstPageContent.angkatanCount}`);
 
     // Take screenshot
     const screenshotPath = 'c:\\temp\\pdf-layout.png';
