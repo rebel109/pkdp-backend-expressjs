@@ -289,18 +289,18 @@ const buildParticipantsPdfHtml=({rows,periodLabel,generatedAt})=>{
   <style>
     @page{size:A4;margin:8mm 6mm}
     *{box-sizing:border-box}
-    body{font-family:Arial,sans-serif;color:#172033;margin:0;font-size:11pt;background:#fff}
+    body{font-family:Arial,sans-serif;color:#172033;margin:0;font-size:10pt;background:#fff}
 
     .sheet{border:1px solid #d7e3f4;border-radius:12px;overflow:hidden;box-shadow:0 12px 32px rgba(30,64,175,.08)}
     .header{padding:8px 12px;background:linear-gradient(135deg,#123f5c 0%,#0f5f8f 52%,#1db6e7 100%);color:#fff;position:relative}
     .header:after{content:"";position:absolute;right:-42px;top:-50px;width:180px;height:180px;border-radius:50%;background:rgba(255,255,255,.18)}
-    .eyebrow{font-size:7pt;font-weight:800;text-transform:uppercase;letter-spacing:.16em;opacity:.9;margin-bottom:2px}
-    h1{font-size:13pt;margin:0 0 2px;text-transform:uppercase;letter-spacing:.03em;line-height:1.1}
-    .subtitle{font-size:7pt;opacity:.92;max-width:680px;line-height:1.2;margin:0}
-    .meta{display:grid;grid-template-columns:repeat(3,1fr);gap:3px;padding:4px 8px;background:#f7fbff;border-bottom:1px solid #d7e3f4}
-    .meta-card{padding:2px 5px;border:1px solid #dbeafe;border-radius:6px;background:#fff}
-    .meta-label{font-size:5.5pt;color:#64748b;text-transform:uppercase;letter-spacing:.08em;font-weight:800;margin-bottom:1px}
-    .meta-value{font-size:8pt;color:#0f172a;font-weight:700;line-height:1.1}
+    .eyebrow{font-size:8pt;font-weight:800;text-transform:uppercase;letter-spacing:.16em;opacity:.9;margin-bottom:2px}
+    h1{font-size:15pt;margin:0 0 2px;text-transform:uppercase;letter-spacing:.03em;line-height:1.1}
+    .subtitle{font-size:8pt;opacity:.92;max-width:680px;line-height:1.2;margin:0}
+    .meta{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;padding:5px 8px;background:#f7fbff;border-bottom:1px solid #d7e3f4}
+    .meta-card{padding:3px 6px;border:1px solid #dbeafe;border-radius:7px;background:#fff}
+    .meta-label{font-size:6pt;color:#64748b;text-transform:uppercase;letter-spacing:.08em;font-weight:800;margin-bottom:1px}
+    .meta-value{font-size:9pt;color:#0f172a;font-weight:700;line-height:1.15}
 
     .content{padding:2px 8px}
 
@@ -317,16 +317,16 @@ const buildParticipantsPdfHtml=({rows,periodLabel,generatedAt})=>{
 
     /* TABLE */
     table{width:100%;table-layout:fixed;border-collapse:separate;border-spacing:0}
-    th,td{padding:1px 3px;vertical-align:top;line-height:1.1;border-bottom:1px solid #e2e8f0;border-right:1px solid #e2e8f0;font-size:11pt}
+    th,td{padding:1px 3px;vertical-align:top;line-height:1.1;border-bottom:1px solid #e2e8f0;border-right:1px solid #e2e8f0;font-size:10pt}
     td:last-child{border-right:0}
     th:last-child{border-right:0}
     tbody tr:last-child td{border-bottom:0}
-    colgroup col:nth-child(1){width:16px}
-    colgroup col:nth-child(2){width:26%}
+    colgroup col:nth-child(1){width:28px}
+    colgroup col:nth-child(2){width:35%}
     colgroup col:nth-child(3){width:auto}
-    th{background:#0f5f8f;color:#fff;text-align:left;font-weight:700;font-size:7pt;text-transform:uppercase;letter-spacing:.04em}
+    th{background:#0f5f8f;color:#fff;text-align:left;font-weight:700;font-size:10pt;text-transform:uppercase;letter-spacing:.04em}
     tbody tr:nth-child(even){background:#f8fafc}
-    .no{width:16px;text-align:center;font-weight:700;color:#0f5f8f;font-size:11pt}
+    .no{width:28px;text-align:center;font-weight:700;color:#0f5f8f;font-size:10pt}
     th.no{color:#fff;text-align:center}
 
     /* FOOTER */
