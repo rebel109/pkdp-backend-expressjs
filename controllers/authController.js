@@ -63,9 +63,9 @@ exports.register=async(req,res,next)=>{
       if(!consent_file||String(consent_file).trim()==='') return res.status(400).json({message:'Surat kesediaan narasumber wajib diunggah'});
       if(!period_id) return res.status(400).json({message:'Pilih periode penugasan terlebih dahulu'});
 
-      const[[period]]=await db.query('SELECT id,is_active FROM periods WHERE id=?',[period_id]);
+      const[[period]]=await db.query('SELECT id,registration_open FROM periods WHERE id=?',[period_id]);
       if(!period) return res.status(400).json({message:'Periode tidak valid'});
-      if(!period.is_active) return res.status(400).json({message:'Pendaftaran ditutup untuk periode ini. Hubungi Admin.'});
+      if(!period.registration_open) return res.status(400).json({message:'Pendaftaran ditutup untuk periode ini. Hubungi Admin.'});
 
       const[existingUsers]=await db.query('SELECT id,role FROM users WHERE email=?',[normalizedEmail]);
       const existingUser=existingUsers[0];
@@ -101,9 +101,9 @@ exports.register=async(req,res,next)=>{
     }
 
     if(selectedRole==='DOSEN'&&period_id){
-      const[[p]]=await db.query('SELECT is_active FROM periods WHERE id=?',[period_id]);
+      const[[p]]=await db.query('SELECT registration_open FROM periods WHERE id=?',[period_id]);
       if(!p) return res.status(400).json({message:'Periode tidak valid'});
-      if(!p.is_active) return res.status(400).json({message:'Pendaftaran ditutup untuk periode ini. Hubungi Admin.'});
+      if(!p.registration_open) return res.status(400).json({message:'Pendaftaran ditutup untuk periode ini. Hubungi Admin.'});
     }
 
     const hashed=await bcrypt.hash(password,12);

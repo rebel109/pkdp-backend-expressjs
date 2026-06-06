@@ -3,5 +3,5 @@ const r=require('express').Router(),c=require('../controllers/periodController')
 r.get('/',c.getAll);
 r.use(authenticate);
 r.post('/',authorize('ADMIN'),c.create);
-r.put('/:id',authorize('ADMIN'),c.update);r.patch('/:id/activate',authorize('ADMIN'),c.setActive);r.post('/deactivate-all',authorize('ADMIN'),c.deactivateAll);r.delete('/:id',authorize('ADMIN'),c.remove);
+r.put('/:id',authorize('ADMIN'),c.update);r.patch('/:id/activate',authorize('ADMIN'),c.setActive);r.patch('/:id/close-registration',authorize('ADMIN'),c.closeRegistration);r.patch('/:id/open-registration',authorize('ADMIN'),c.openRegistration);r.post('/deactivate-all',authorize('ADMIN'),c.deactivateAll);r.delete('/:id',authorize('ADMIN'),c.remove);
 module.exports=r;

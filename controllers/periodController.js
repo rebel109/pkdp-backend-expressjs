@@ -5,3 +5,5 @@ exports.setActive=async(req,res,next)=>{try{await db.query('UPDATE periods SET i
 exports.update=async(req,res,next)=>{try{const{year,label}=req.body;await db.query('UPDATE periods SET year=?,label=? WHERE id=?',[year,label,req.params.id]);res.json({message:'Periode diperbarui'});}catch(e){next(e);}};
 exports.remove=async(req,res,next)=>{try{await db.query('DELETE FROM periods WHERE id=?',[req.params.id]);res.json({message:'Periode dihapus'});}catch(e){next(e);}};
 exports.deactivateAll=async(req,res,next)=>{try{await db.query('UPDATE periods SET is_active=0');res.json({message:'Semua periode telah dinonaktifkan'});}catch(e){next(e);}};
+exports.closeRegistration=async(req,res,next)=>{try{await db.query('UPDATE periods SET registration_open=0 WHERE id=?',[req.params.id]);res.json({message:'Pendaftaran ditutup untuk periode ini'});}catch(e){next(e);}};
+exports.openRegistration=async(req,res,next)=>{try{await db.query('UPDATE periods SET registration_open=1 WHERE id=?',[req.params.id]);res.json({message:'Pendaftaran dibuka untuk periode ini'});}catch(e){next(e);}};
