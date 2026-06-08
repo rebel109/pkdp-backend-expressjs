@@ -13,7 +13,7 @@ const ISC2_COMPONENTS=[
 
 const isValidAssessmentComponent=(phase,component)=>{
   if(phase==='ISC1') return !component;
-  if(phase==='OJC') return OJC_COMPONENTS.includes(component);
+  if(phase==='OJC') return !component || OJC_COMPONENTS.includes(component);
   if(phase==='ISC2') return ISC2_COMPONENTS.includes(component);
   return false;
 };
@@ -121,14 +121,16 @@ exports.getOne=async(req,res,next)=>{
 
 exports.create=async(req,res,next)=>{
   try{
-    const{period_id,class_id,material_id,title,description,phase,task_type,assessment_component,order_no,pretest_open,pretest_close,posttest_open,posttest_close,upload_open,upload_close}=req.body;
+    const{period_id,class_id,material_id,title,description,phase,task_type,assessment_component,order_no,pretest_open,pretest_close,posttest_open,posttest_close,briefing_open,briefing_close,upload_open,upload_close}=req.body;
     if(!period_id||!title||!phase||!task_type)
       return res.status(400).json({message:'period_id, title, phase, task_type wajib'});
 
     if(phase==='ISC1'&&!['PRETEST','POSTTEST'].includes(task_type))
       return res.status(400).json({message:'ISC1 hanya boleh PRETEST/POSTTEST'});
-    if((phase==='OJC'||phase==='ISC2')&&task_type!=='UPLOAD')
-      return res.status(400).json({message:'OJC/ISC2 hanya boleh task_type UPLOAD'});
+    if(phase==='ISC2'&&task_type!=='UPLOAD')
+      return res.status(400).json({message:'ISC2 hanya boleh task_type UPLOAD'});
+    if(phase==='OJC'&&!['UPLOAD','BRIEFING'].includes(task_type))
+      return res.status(400).json({message:'OJC boleh task_type UPLOAD atau BRIEFING'});
     if((phase==='OJC'||phase==='ISC2')&&!class_id)
       return res.status(400).json({message:'class_id wajib untuk OJC/ISC2'});
 
@@ -137,19 +139,21 @@ exports.create=async(req,res,next)=>{
       return res.status(400).json({message:'Komponen penilaian tidak valid untuk fase ini'});
 
     const[r]=await db.query(
-      'INSERT INTO tasks (period_id,class_id,material_id,title,description,phase,task_type,assessment_component,order_no,pretest_open,pretest_close,posttest_open,posttest_close,upload_open,upload_close) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-      [period_id,class_id||null,material_id||null,title,description||null,phase,task_type,component,order_no||1,pretest_open||null,pretest_close||null,posttest_open||null,posttest_close||null,upload_open||null,upload_close||null]);
+      'INSERT INTO tasks (period_id,class_id,material_id,title,description,phase,task_type,assessment_component,order_no,pretest_open,pretest_close,posttest_open,posttest_close,briefing_open,briefing_close,upload_open,upload_close) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+      [period_id,class_id||null,material_id||null,title,description||null,phase,task_type,component,order_no||1,pretest_open||null,pretest_close||null,posttest_open||null,posttest_close||null,briefing_open||null,briefing_close||null,upload_open||null,upload_close||null]);
     res.status(201).json({message:'Tugas dibuat',id:r.insertId});
   }catch(e){next(e);}
 };
 
 exports.update=async(req,res,next)=>{
   try{
-    const{title,description,phase,task_type,assessment_component,order_no,class_id,material_id,pretest_open,pretest_close,posttest_open,posttest_close,upload_open,upload_close}=req.body;
+    const{title,description,phase,task_type,assessment_component,order_no,class_id,material_id,pretest_open,pretest_close,posttest_open,posttest_close,briefing_open,briefing_close,upload_open,upload_close}=req.body;
     if(phase==='ISC1'&&!['PRETEST','POSTTEST'].includes(task_type))
       return res.status(400).json({message:'ISC1 hanya boleh PRETEST/POSTTEST'});
-    if((phase==='OJC'||phase==='ISC2')&&task_type!=='UPLOAD')
-      return res.status(400).json({message:'OJC/ISC2 hanya boleh task_type UPLOAD'});
+    if(phase==='ISC2'&&task_type!=='UPLOAD')
+      return res.status(400).json({message:'ISC2 hanya boleh task_type UPLOAD'});
+    if(phase==='OJC'&&!['UPLOAD','BRIEFING'].includes(task_type))
+      return res.status(400).json({message:'OJC boleh task_type UPLOAD atau BRIEFING'});
     if((phase==='OJC'||phase==='ISC2')&&!class_id)
       return res.status(400).json({message:'class_id wajib untuk OJC/ISC2'});
 
@@ -158,8 +162,8 @@ exports.update=async(req,res,next)=>{
       return res.status(400).json({message:'Komponen penilaian tidak valid untuk fase ini'});
 
     await db.query(
-      'UPDATE tasks SET title=?,description=?,phase=?,task_type=?,assessment_component=?,order_no=?,class_id=?,material_id=?,pretest_open=?,pretest_close=?,posttest_open=?,posttest_close=?,upload_open=?,upload_close=? WHERE id=?',
-      [title,description,phase,task_type,component,order_no||1,class_id||null,material_id||null,pretest_open||null,pretest_close||null,posttest_open||null,posttest_close||null,upload_open||null,upload_close||null,req.params.id]);
+      'UPDATE tasks SET title=?,description=?,phase=?,task_type=?,assessment_component=?,order_no=?,class_id=?,material_id=?,pretest_open=?,pretest_close=?,posttest_open=?,posttest_close=?,briefing_open=?,briefing_close=?,upload_open=?,upload_close=? WHERE id=?',
+      [title,description,phase,task_type,component,order_no||1,class_id||null,material_id||null,pretest_open||null,pretest_close||null,posttest_open||null,posttest_close||null,briefing_open||null,briefing_close||null,upload_open||null,upload_close||null,req.params.id]);
     res.json({message:'Tugas diperbarui'});
   }catch(e){next(e);}
 };

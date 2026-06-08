@@ -53,6 +53,7 @@ const getLocalBrowserPath=()=>{
 const getAttendanceWindow=task=>{
   if(task.task_type==='PRETEST') return {openAt:task.pretest_open?new Date(task.pretest_open).getTime():null,closeAt:task.pretest_close?new Date(task.pretest_close).getTime():null};
   if(task.task_type==='POSTTEST') return {openAt:task.posttest_open?new Date(task.posttest_open).getTime():null,closeAt:task.posttest_close?new Date(task.posttest_close).getTime():null};
+  if(task.task_type==='BRIEFING') return {openAt:task.briefing_open?new Date(task.briefing_open).getTime():null,closeAt:task.briefing_close?new Date(task.briefing_close).getTime():null};
   return {openAt:task.upload_open?new Date(task.upload_open).getTime():null,closeAt:task.upload_close?new Date(task.upload_close).getTime():null};
 };
 
@@ -80,6 +81,7 @@ const buildStatus=task=>{
 const getBadgeLabel=task=>{
   if(task.task_type==='PRETEST') return 'Pretest';
   if(task.task_type==='POSTTEST') return 'Posttest';
+  if(task.task_type==='BRIEFING') return 'Briefing';
   return task.phase;
 };
 
@@ -135,7 +137,7 @@ const groupAttendanceItems=(items,{mergeCounts=false}={})=>{
 
 const baseTaskSelect=`
   SELECT t.id,t.title,t.phase,t.class_id,t.material_id,t.task_type,t.assessment_component,t.order_no,
-         t.pretest_open,t.pretest_close,t.posttest_open,t.posttest_close,t.upload_open,t.upload_close,
+         t.pretest_open,t.pretest_close,t.posttest_open,t.posttest_close,t.briefing_open,t.briefing_close,t.upload_open,t.upload_close,
          c.name AS class_name,co.cohort_no,
          tas.is_open_override,
          tar.attended_at,
@@ -185,12 +187,11 @@ exports.getMyAttendance=async(req,res,next)=>{
              )
              OR
              (
-               t.phase IN ('OJC','ISC2')
-               AND t.task_type='UPLOAD'
-               AND t.class_id IN (SELECT class_id FROM class_members WHERE user_id=?)
-             )
+               (t.phase IN ('OJC','ISC2') AND t.task_type='UPLOAD')
+               OR (t.phase='OJC' AND t.task_type='BRIEFING')
+             ) AND t.class_id IN (SELECT class_id FROM class_members WHERE user_id=?)
            )
-         ORDER BY FIELD(t.phase,'ISC1','OJC','ISC2'),t.order_no,t.id`,
+         ORDER BY t.phase,t.order_no,t.id`,
         [req.user.id,'DOSEN',req.user.id,req.user.id,req.user.id]
       );
       rows=groupAttendanceItems(items).map(item=>{
@@ -215,10 +216,12 @@ exports.getMyAttendance=async(req,res,next)=>{
     }else{
       const[items]=await db.query(
         `${baseTaskSelect}
-         WHERE t.phase IN ('OJC','ISC2')
-           AND t.task_type='UPLOAD'
-           AND t.period_id=?
+         WHERE t.period_id=?
            AND t.class_id IN (SELECT class_id FROM class_narasumber WHERE narasumber_id=?)
+           AND (
+             (t.phase IN ('OJC','ISC2') AND t.task_type='UPLOAD')
+             OR (t.phase='OJC' AND t.task_type='BRIEFING')
+           )
            AND EXISTS (
              SELECT 1 FROM class_narasumber cnx
              WHERE cnx.class_id=t.class_id AND cnx.narasumber_id=?
@@ -299,32 +302,44 @@ exports.markAttendance=async(req,res,next)=>{
              AND t.task_type='UPLOAD'
              AND t.class_id IN (SELECT class_id FROM class_members WHERE user_id=?)
            )
+           OR
+           (
+             t.phase='OJC'
+             AND t.task_type='BRIEFING'
+             AND t.class_id IN (SELECT class_id FROM class_members WHERE user_id=?)
+           )
          )`
-      : `t.phase IN ('OJC','ISC2') AND t.task_type='UPLOAD'
-         AND t.period_id=?
-         AND t.class_id IN (SELECT class_id FROM class_narasumber WHERE narasumber_id=?)
-         AND EXISTS (
-           SELECT 1 FROM class_narasumber cnx
-           WHERE cnx.class_id=t.class_id AND cnx.narasumber_id=?
-             AND (
-               cnx.material_id IS NULL
-               OR cnx.material_id=t.id
-               OR (t.material_id IS NOT NULL AND cnx.material_id=t.material_id)
-               OR cnx.material_id IN (
-                 SELECT tx.id FROM tasks tx
-                 WHERE tx.class_id=t.class_id
-                   AND tx.phase=t.phase
-                   AND tx.task_type=t.task_type
-                   AND tx.assessment_component=t.assessment_component
-                   AND LOWER(TRIM(tx.title))=LOWER(TRIM(t.title))
-               )
-             )
+      : `(
+           (t.phase IN ('OJC','ISC2') AND t.task_type='UPLOAD'
+            AND t.period_id=?
+            AND t.class_id IN (SELECT class_id FROM class_narasumber WHERE narasumber_id=?)
+            AND EXISTS (
+              SELECT 1 FROM class_narasumber cnx
+              WHERE cnx.class_id=t.class_id AND cnx.narasumber_id=?
+                AND (
+                  cnx.material_id IS NULL
+                  OR cnx.material_id=t.id
+                  OR (t.material_id IS NOT NULL AND cnx.material_id=t.material_id)
+                  OR cnx.material_id IN (
+                    SELECT tx.id FROM tasks tx
+                    WHERE tx.class_id=t.class_id
+                      AND tx.phase=t.phase
+                      AND tx.task_type=t.task_type
+                      AND tx.assessment_component=t.assessment_component
+                      AND LOWER(TRIM(tx.title))=LOWER(TRIM(t.title))
+                  )
+                )
+            ))
+           OR
+           (t.phase='OJC' AND t.task_type='BRIEFING'
+            AND t.period_id=?
+            AND t.class_id IN (SELECT class_id FROM class_narasumber WHERE narasumber_id=?))
          )`;
-    const accessParams=role==='DOSEN'?[req.user.id,req.user.id,req.user.id]:[req.user.period_id,req.user.id,req.user.id];
+    const accessParams=role==='DOSEN'?[req.user.id,req.user.id,req.user.id,req.user.id]:[req.user.period_id,req.user.id,req.user.id,req.user.period_id,req.user.id];
 
     const[[task]]=await db.query(
       `SELECT t.id,t.title,t.phase,t.class_id,t.task_type,
-              t.pretest_open,t.pretest_close,t.posttest_open,t.posttest_close,t.upload_open,t.upload_close,
+              t.pretest_open,t.pretest_close,t.posttest_open,t.posttest_close,t.briefing_open,t.briefing_close,t.upload_open,t.upload_close,
               tas.is_open_override
        FROM tasks t
        LEFT JOIN task_attendance_settings tas ON tas.task_id=t.id
@@ -348,8 +363,8 @@ exports.markAttendance=async(req,res,next)=>{
 const buildAdminRecapData=async(query={})=>{
   await ensureSchema();
   const{period_id,class_id,phase,role}=query;
-  let rowWhere=`WHERE ((t.phase='ISC1' AND t.task_type IN ('PRETEST','POSTTEST')) OR (t.phase IN ('OJC','ISC2') AND t.task_type='UPLOAD'))`;
-  let taskWhere=`WHERE ((t.phase='ISC1' AND t.task_type IN ('PRETEST','POSTTEST')) OR (t.phase IN ('OJC','ISC2') AND t.task_type='UPLOAD'))`;
+  let rowWhere=`WHERE ((t.phase='ISC1' AND t.task_type IN ('PRETEST','POSTTEST')) OR (t.phase IN ('OJC','ISC2') AND t.task_type='UPLOAD') OR (t.phase='OJC' AND t.task_type='BRIEFING'))`;
+  let taskWhere=`WHERE ((t.phase='ISC1' AND t.task_type IN ('PRETEST','POSTTEST')) OR (t.phase IN ('OJC','ISC2') AND t.task_type='UPLOAD') OR (t.phase='OJC' AND t.task_type='BRIEFING'))`;
   const rowParams=[];
   const taskParams=[];
 
@@ -381,6 +396,12 @@ const buildAdminRecapData=async(query={})=>{
           )
           AND tar.user_id IN (SELECT user_id FROM class_members WHERE class_id=?)
         )
+        OR (
+          tar.attendance_role='DOSEN'
+          AND t.phase='OJC'
+          AND t.task_type='BRIEFING'
+          AND t.class_id=?
+        )
       )`;
       taskWhere+=` AND (
         t.class_id=?
@@ -393,9 +414,14 @@ const buildAdminRecapData=async(query={})=>{
             WHERE cm2.class_id=? AND pr2.selected_class_id=t.class_id
           )
         )
+        OR (
+          t.phase='OJC'
+          AND t.task_type='BRIEFING'
+          AND t.class_id=?
+        )
       )`;
-      rowParams.push(class_id,class_id,class_id);
-      taskParams.push(class_id,class_id);
+      rowParams.push(class_id,class_id,class_id,class_id);
+      taskParams.push(class_id,class_id,class_id);
     }else{
       rowWhere+=' AND COALESCE(t.class_id,participant_class.id)=?';
       taskWhere+=' AND t.class_id=?';
@@ -636,7 +662,7 @@ exports.setTaskOverride=async(req,res,next)=>{
     const isOpenOverride=req.body?.is_open_override?1:0;
     if(!Number.isInteger(taskId)) return res.status(400).json({message:'Task tidak valid'});
 
-    const[[task]]=await db.query(`SELECT id,phase,task_type FROM tasks WHERE id=? AND ((phase='ISC1' AND task_type IN ('PRETEST','POSTTEST')) OR (phase IN ('OJC','ISC2') AND task_type='UPLOAD'))`,[taskId]);
+    const[[task]]=await db.query(`SELECT id,phase,task_type FROM tasks WHERE id=? AND ((phase='ISC1' AND task_type IN ('PRETEST','POSTTEST')) OR (phase IN ('OJC','ISC2') AND task_type='UPLOAD') OR (phase='OJC' AND task_type='BRIEFING'))`,[taskId]);
     if(!task) return res.status(404).json({message:'Task absensi tidak ditemukan'});
 
     await db.query(

@@ -59,7 +59,7 @@ const buildNarasumberMatrix=async({periodId,phase,allowedClassIds=null})=>{
   const classIds=classes.map(c=>c.id);
   const ph=classIds.map(()=>'?').join(',');
   const taskParams=[periodId,...classIds];
-  let taskWhere=`t.period_id=? AND t.class_id IN (${ph}) AND t.phase IN ('OJC','ISC2')`;
+  let taskWhere=`t.period_id=? AND t.class_id IN (${ph}) AND t.phase IN ('OJC','ISC2') AND t.task_type='UPLOAD'`;
   if(phase){taskWhere+=' AND t.phase=?';taskParams.push(phase);}
 
   const[tasks]=await db.query(
@@ -449,7 +449,7 @@ exports.assignNarasumber=async(req,res,next)=>{
       if(!Number.isInteger(materialId)) return res.status(400).json({message:'material_id tidak valid'});
       const [rows]=await db.query(
         `SELECT t.id,t.title FROM tasks t
-         WHERE t.id=? AND t.class_id=? AND t.phase IN ('OJC','ISC2')`,
+         WHERE t.id=? AND t.class_id=? AND t.phase IN ('OJC','ISC2') AND t.task_type='UPLOAD'`,
         [materialId,classId]
       );
       if(!rows.length) return res.status(400).json({message:'Tugas tidak ditemukan pada kelas ini'});
@@ -457,7 +457,7 @@ exports.assignNarasumber=async(req,res,next)=>{
     }else{
       const [rows]=await db.query(
         `SELECT t.id,t.title FROM tasks t
-         WHERE t.class_id=? AND t.phase IN ('OJC','ISC2')`,
+         WHERE t.class_id=? AND t.phase IN ('OJC','ISC2') AND t.task_type='UPLOAD'`,
         [classId]
       );
       if(!rows.length) return res.status(400).json({message:'Kelas ini belum memiliki tugas OJC/ISC2 untuk ditugaskan'});
@@ -468,23 +468,19 @@ exports.assignNarasumber=async(req,res,next)=>{
     const taskPh=taskIds.map(()=>'?').join(',');
 
     const [targetSlots]=await db.query(
-      `SELECT ss.id,ss.task_id,ss.slot_date,ss.start_time,ss.end_time,c.name AS class_name
+      `SELECT DISTINCT ss.id,ss.task_id,ss.slot_date,ss.start_time,ss.end_time
        FROM schedule_slots ss
        JOIN schedule_slot_classes ssc ON ssc.schedule_slot_id=ss.id
-       JOIN classes c ON c.id=ssc.class_id
-       WHERE ssc.class_id=? AND ss.task_id IN (${taskPh})
-       GROUP BY ss.id,ss.task_id,ss.slot_date,ss.start_time,ss.end_time,c.name`,
+       WHERE ssc.class_id=? AND ss.task_id IN (${taskPh})`,
       [classId,...taskIds]
     );
 
     if(targetSlots.length){
       const [otherSlots]=await db.query(
-        `SELECT ss.id,ss.slot_date,ss.start_time,ss.end_time,c.id AS class_id,c.name AS class_name
+        `SELECT DISTINCT ss.id,ss.slot_date,ss.start_time,ss.end_time
          FROM schedule_slot_classes ssc
          JOIN schedule_slots ss ON ss.id=ssc.schedule_slot_id
-         JOIN classes c ON c.id=ssc.class_id
-         WHERE ssc.narasumber_id=? AND ssc.class_id<>?
-         GROUP BY ss.id,ss.slot_date,ss.start_time,ss.end_time,c.id,c.name`,
+         WHERE ssc.narasumber_id=? AND ssc.class_id<>?`,
         [narasumberId,classId]
       );
 
@@ -494,7 +490,7 @@ exports.assignNarasumber=async(req,res,next)=>{
           const overlap=ns.start_time<ex.end_time&&ns.end_time>ex.start_time;
           if(overlap){
             return res.status(400).json({
-              message:`Bentrok jadwal: ${ns.slot_date} ${String(ns.start_time).slice(0,5)}-${String(ns.end_time).slice(0,5)} berbenturan dengan kelas ${ex.class_name}`
+              message:`Bentrok jadwal: ${ns.slot_date} ${String(ns.start_time).slice(0,5)}-${String(ns.end_time).slice(0,5)} dengan slot lain`
             });
           }
         }
@@ -528,7 +524,7 @@ exports.assignNarasumber=async(req,res,next)=>{
             const overlap=twStart<owEnd&&twEnd>owStart;
             if(overlap){
               return res.status(400).json({
-                message:`Bentrok jadwal tugas: ${tw.title} (${tw.class_name}) bertabrakan dengan kelas ${ow.class_name}`
+                message:`Bentrok jadwal tugas: ${tw.title} (${tw.class_name}) bertabrakan dengan ${ow.title} di kelas ${ow.class_name}`
               });
             }
           }
@@ -573,7 +569,37 @@ exports.assignNarasumber=async(req,res,next)=>{
     }finally{conn.release();}
   }catch(e){next(e);}
 };
-exports.removeNarasumber=async(req,res,next)=>{try{const nsId=req.params.nsId;const mid=req.params.mid;if(mid)await db.query('DELETE FROM class_narasumber WHERE class_id=? AND narasumber_id=? AND material_id=?',[req.params.id,nsId,mid]);else await db.query('DELETE FROM class_narasumber WHERE class_id=? AND narasumber_id=? AND material_id IS NULL',[req.params.id,nsId]);res.json({message:'Narasumber dihapus dari kelas'});}catch(e){next(e);}};
+exports.removeNarasumber=async(req,res,next)=>{
+  try{
+    const classId=req.params.id;
+    const nsId=req.params.nsId;
+    const mid=req.params.mid;
+
+    const conn=await db.getConnection();
+    try{
+      await conn.beginTransaction();
+
+      if(mid){
+        await conn.query('DELETE FROM class_narasumber WHERE class_id=? AND narasumber_id=? AND material_id=?',[classId,nsId,mid]);
+        await conn.query(`UPDATE schedule_slot_classes ssc
+          JOIN schedule_slots ss ON ss.id=ssc.schedule_slot_id
+          SET ssc.narasumber_id=NULL
+          WHERE ssc.class_id=? AND ssc.narasumber_id=? AND ss.task_id=?`,[classId,nsId,mid]);
+      }else{
+        await conn.query('DELETE FROM class_narasumber WHERE class_id=? AND narasumber_id=? AND material_id IS NULL',[classId,nsId]);
+        await conn.query('UPDATE schedule_slot_classes SET narasumber_id=NULL WHERE class_id=? AND narasumber_id=?',[classId,nsId]);
+      }
+
+      await conn.commit();
+      res.json({message:'Narasumber dihapus dari kelas'});
+    }catch(e){
+      await conn.rollback();
+      throw e;
+    }finally{
+      conn.release();
+    }
+  }catch(e){next(e);}
+};
 exports.addMember=async(req,res,next)=>{try{await db.query('INSERT IGNORE INTO class_members (class_id,user_id) VALUES (?,?)',[req.params.id,req.body.user_id]);res.json({message:'Dosen ditambahkan'});}catch(e){next(e);}};
 exports.removeMember=async(req,res,next)=>{try{await db.query('DELETE FROM class_members WHERE class_id=? AND user_id=?',[req.params.id,req.params.userId]);res.json({message:'Dosen dihapus dari kelas'});}catch(e){next(e);}};
 exports.getMyClasses=async(req,res,next)=>{try{const[r]=await db.query(`SELECT c.*,p.label AS period_label FROM class_members cm JOIN classes c ON c.id=cm.class_id LEFT JOIN periods p ON p.id=c.period_id WHERE cm.user_id=? ORDER BY c.phase`,[req.user.id]);res.json(r);}catch(e){next(e);}};
