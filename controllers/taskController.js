@@ -20,6 +20,23 @@ const isValidAssessmentComponent=(phase,component)=>{
 
 const normalizeAssessmentComponent=v=>v?String(v).trim().toUpperCase():null;
 
+const validateTimeWindow=(openValue,closeValue,label)=>{
+  if(!openValue&&!closeValue) return null;
+  if(!openValue||!closeValue) return `${label} buka/tutup wajib diisi lengkap`;
+  const openDate=new Date(openValue);
+  const closeDate=new Date(closeValue);
+  if(Number.isNaN(openDate.getTime())||Number.isNaN(closeDate.getTime())) return `${label} tidak valid`;
+  if(openDate>=closeDate) return `${label} tutup harus setelah ${label} buka`;
+  return null;
+};
+
+const validateTaskWindows=({pretest_open,pretest_close,posttest_open,posttest_close,briefing_open,briefing_close,upload_open,upload_close})=>{
+  return validateTimeWindow(pretest_open,pretest_close,'Waktu pretest')
+    || validateTimeWindow(posttest_open,posttest_close,'Waktu posttest')
+    || validateTimeWindow(briefing_open,briefing_close,'Waktu briefing')
+    || validateTimeWindow(upload_open,upload_close,'Waktu upload');
+};
+
 exports.getAll=async(req,res,next)=>{
   try{
     const{phase,period_id,class_id}=req.query;
@@ -138,6 +155,9 @@ exports.create=async(req,res,next)=>{
     if(!isValidAssessmentComponent(phase,component))
       return res.status(400).json({message:'Komponen penilaian tidak valid untuk fase ini'});
 
+    const timeWindowError=validateTaskWindows({pretest_open,pretest_close,posttest_open,posttest_close,briefing_open,briefing_close,upload_open,upload_close});
+    if(timeWindowError) return res.status(400).json({message:timeWindowError});
+
     const[r]=await db.query(
       'INSERT INTO tasks (period_id,class_id,material_id,title,description,phase,task_type,assessment_component,order_no,pretest_open,pretest_close,posttest_open,posttest_close,briefing_open,briefing_close,upload_open,upload_close) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
       [period_id,class_id||null,material_id||null,title,description||null,phase,task_type,component,order_no||1,pretest_open||null,pretest_close||null,posttest_open||null,posttest_close||null,briefing_open||null,briefing_close||null,upload_open||null,upload_close||null]);
@@ -160,6 +180,9 @@ exports.update=async(req,res,next)=>{
     const component=normalizeAssessmentComponent(assessment_component);
     if(!isValidAssessmentComponent(phase,component))
       return res.status(400).json({message:'Komponen penilaian tidak valid untuk fase ini'});
+
+    const timeWindowError=validateTaskWindows({pretest_open,pretest_close,posttest_open,posttest_close,briefing_open,briefing_close,upload_open,upload_close});
+    if(timeWindowError) return res.status(400).json({message:timeWindowError});
 
     await db.query(
       'UPDATE tasks SET title=?,description=?,phase=?,task_type=?,assessment_component=?,order_no=?,class_id=?,material_id=?,pretest_open=?,pretest_close=?,posttest_open=?,posttest_close=?,briefing_open=?,briefing_close=?,upload_open=?,upload_close=? WHERE id=?',

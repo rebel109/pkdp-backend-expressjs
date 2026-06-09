@@ -32,7 +32,7 @@ const getMatrixVisibility=async(periodId,phase)=>{
   return Boolean(row?.is_visible);
 };
 
-const buildNarasumberMatrix=async({periodId,phase,allowedClassIds=null})=>{
+const buildNarasumberMatrix=async({periodId,phase,allowedClassIds=null,allowedTaskIds=null})=>{
   if(!periodId) return {period_id:null,classes:[],materials:[],cells:{},is_visible:false};
 
   const classParams=[periodId];
@@ -61,9 +61,16 @@ const buildNarasumberMatrix=async({periodId,phase,allowedClassIds=null})=>{
   const taskParams=[periodId,...classIds];
   let taskWhere=`t.period_id=? AND t.class_id IN (${ph}) AND t.phase IN ('OJC','ISC2') AND t.task_type='UPLOAD'`;
   if(phase){taskWhere+=' AND t.phase=?';taskParams.push(phase);}
+  if(Array.isArray(allowedTaskIds)){
+    if(!allowedTaskIds.length) return {period_id:periodId,classes,materials:[],cells:{},is_visible:await getMatrixVisibility(periodId,phase)};
+    const taskPh=allowedTaskIds.map(()=>'?').join(',');
+    taskWhere+=` AND t.id IN (${taskPh})`;
+    taskParams.push(...allowedTaskIds);
+  }
 
   const[tasks]=await db.query(
-    `SELECT t.id,t.title,t.phase,t.assessment_component,t.order_no,t.class_id,t.material_id
+    `SELECT t.id,t.title,t.phase,t.assessment_component,t.order_no,t.class_id,t.material_id,
+            t.upload_open,t.upload_close
      FROM tasks t
      WHERE ${taskWhere}
      ORDER BY t.phase,t.order_no,t.title,t.id`,
@@ -72,14 +79,26 @@ const buildNarasumberMatrix=async({periodId,phase,allowedClassIds=null})=>{
 
   const materials=[];
   const materialMap=new Map();
+  const pickEarlierDateTime=(current,next)=>{
+    if(!current) return next||null;
+    if(!next) return current;
+    return new Date(next)<new Date(current)?next:current;
+  };
+  const pickLaterDateTime=(current,next)=>{
+    if(!current) return next||null;
+    if(!next) return current;
+    return new Date(next)>new Date(current)?next:current;
+  };
   for(const t of tasks){
     const key=buildMaterialKey(t);
     const existing=materialMap.get(key);
     if(existing){
       existing.task_ids.push(t.id);
       existing.order_no=Math.min(existing.order_no||9999,t.order_no||9999);
+      existing.upload_open=pickEarlierDateTime(existing.upload_open,t.upload_open);
+      existing.upload_close=pickLaterDateTime(existing.upload_close,t.upload_close);
     }else{
-      const item={key,title:t.title,phase:t.phase,assessment_component:t.assessment_component,order_no:t.order_no||9999,task_ids:[t.id],slot:null};
+      const item={key,title:t.title,phase:t.phase,assessment_component:t.assessment_component,order_no:t.order_no||9999,task_ids:[t.id],slot:null,upload_open:t.upload_open||null,upload_close:t.upload_close||null};
       materialMap.set(key,item);
       materials.push(item);
     }
@@ -108,7 +127,7 @@ const buildNarasumberMatrix=async({periodId,phase,allowedClassIds=null})=>{
 
     const[assigned]=await db.query(
       `SELECT t.id,t.title,t.phase,t.assessment_component,t.class_id,
-              GROUP_CONCAT(DISTINCT u.name ORDER BY u.name SEPARATOR ', ') AS narasumber_names
+              GROUP_CONCAT(DISTINCT u.name ORDER BY u.name SEPARATOR '\n') AS narasumber_names
        FROM tasks t
        JOIN class_narasumber cn ON cn.class_id=t.class_id AND (cn.material_id=t.id OR (t.material_id IS NOT NULL AND cn.material_id=t.material_id))
        JOIN users u ON u.id=cn.narasumber_id
@@ -167,6 +186,7 @@ exports.getMyScheduleMatrix=async(req,res,next)=>{
       }
 
       let rows=[];
+      let allowedTaskIds=null;
       if(req.user.role==='DOSEN'){
         [rows]=await db.query(
           `SELECT DISTINCT c.id FROM class_members cm JOIN classes c ON c.id=cm.class_id WHERE cm.user_id=? AND c.period_id=? AND c.phase=?`,
@@ -177,8 +197,18 @@ exports.getMyScheduleMatrix=async(req,res,next)=>{
           `SELECT DISTINCT c.id FROM class_narasumber cn JOIN classes c ON c.id=cn.class_id WHERE cn.narasumber_id=? AND c.period_id=? AND c.phase=?`,
           [req.user.id,periodId,phase]
         );
+        const[taskRows]=await db.query(
+          `SELECT DISTINCT cn.material_id AS task_id
+           FROM class_narasumber cn
+           JOIN classes c ON c.id=cn.class_id
+           JOIN tasks t ON t.id=cn.material_id
+           WHERE cn.narasumber_id=? AND c.period_id=? AND c.phase=?
+             AND t.phase IN ('OJC','ISC2') AND t.task_type='UPLOAD' AND cn.material_id IS NOT NULL`,
+          [req.user.id,periodId,phase]
+        );
+        allowedTaskIds=taskRows.map(r=>r.task_id).filter(Boolean);
       }
-      matrices[phase]={...(await buildNarasumberMatrix({periodId,phase,allowedClassIds:rows.map(r=>r.id)})),phase,is_visible:true};
+      matrices[phase]={...(await buildNarasumberMatrix({periodId,phase,allowedClassIds:rows.map(r=>r.id),allowedTaskIds})),phase,is_visible:true};
     }
 
     res.json({period_id:periodId,matrices});
