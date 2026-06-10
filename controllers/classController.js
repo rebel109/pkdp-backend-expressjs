@@ -410,6 +410,31 @@ exports.exportParticipantsPdf=async(req,res,next)=>{
     }
   }catch(e){next(e);}
 };
+exports.exportParticipantsData=async(req,res,next)=>{
+  try{
+    const periodId=req.query.period_id?Number(req.query.period_id):await getActivePeriodId();
+    if(!periodId) return res.status(400).json({message:'period_id wajib'});
+    const[[period]]=await db.query('SELECT label,year FROM periods WHERE id=?',[periodId]);
+    if(!period) return res.status(404).json({message:'Periode tidak ditemukan'});
+    const rows=await getParticipantClassRows({periodId});
+    const phaseLabels={ISC1:'ISC 1',OJC:'OJC',ISC2:'ISC 2'};
+    const items=rows.map(r=>{
+      const nidnValid=r.nidn&&String(r.nidn).trim()&&!['-','0'].includes(String(r.nidn).trim());
+      const nuptkValid=r.nuptk&&String(r.nuptk).trim()&&!['-','0'].includes(String(r.nuptk).trim());
+      const identity=nidnValid?String(r.nidn).trim():nuptkValid?String(r.nuptk).trim():(r.identity_no!=='—'?r.identity_no:'—');
+      return{
+        cohort_no:r.cohort_no||null,
+        cohort_label:r.cohort_no?`Angkatan ${r.cohort_no}`:'Tanpa Angkatan',
+        phase:r.class_phase||'ISC1',
+        phase_label:phaseLabels[r.class_phase||'ISC1']||(r.class_phase||'ISC1'),
+        class_name:r.class_name||'—',
+        identity_no:identity,
+        name:r.name||'—'
+      };
+    });
+    res.json({period_label:period.label||`Periode ${period.year||periodId}`,rows:items});
+  }catch(e){next(e);}
+};
 exports.getOne=async(req,res,next)=>{
   try{
     const[[cls]]=await db.query(`SELECT c.*,p.label AS period_label,co.cohort_no,co.ojc_mode FROM classes c LEFT JOIN periods p ON p.id=c.period_id LEFT JOIN cohorts co ON co.id=c.cohort_id WHERE c.id=?`,[req.params.id]);
