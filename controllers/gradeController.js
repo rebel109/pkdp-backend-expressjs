@@ -138,7 +138,7 @@ const phaseOrder=['ISC1','OJC','ISC2'];
 const ACTIVE_SUBMISSION_STATUSES=['submitted','reviewed','revision','approved'];
 
 const buildParticipantRecapData=async({period_id,phase,class_id})=>{
-  let participantQ=`SELECT u.id AS user_id,u.name,u.email,pr.nidn,pr.nuptk,pr.nip,pr.institution,pr.unit_kerja,
+  let participantQ=`SELECT u.id AS user_id,u.name,u.email,pr.nidn,pr.nuptk,pr.nip,pr.institution,pr.unit_kerja,pr.avatar_url,
                            c.id AS class_id,c.name AS class_name,c.phase AS class_phase
                     FROM users u
                     LEFT JOIN profiles pr ON pr.user_id=u.id
@@ -464,6 +464,7 @@ exports.participantRecap=async(req,res,next)=>{
         user_id:p.user_id,
         name:p.name,
         email:p.email,
+        avatar_url:p.avatar_url,
         nidn:p.nidn,
         nuptk:p.nuptk,
         nip:p.nip,
