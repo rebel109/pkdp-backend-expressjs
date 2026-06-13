@@ -156,13 +156,8 @@ exports.login=async(req,res,next)=>{
         return res.status(403).json({message:'Narasumber belum terdaftar pada periode aktif'});
       }
 
-      const currentStatus=latestNarasumberSubmission.status;
-      if(currentStatus!=='verified'){
-        if(currentStatus==='rejected') return res.status(403).json({message:latestNarasumberSubmission.reject_reason||'Pendaftaran narasumber ditolak admin'});
-        return res.status(403).json({message:'Pendaftaran narasumber Anda masih menunggu verifikasi admin'});
-      }
       user.period_id=latestNarasumberSubmission.period_id;
-      user.narasumber_status=currentStatus;
+      user.narasumber_status=latestNarasumberSubmission.status;
       user.narasumber_reject_reason=latestNarasumberSubmission.reject_reason||null;
     }
 

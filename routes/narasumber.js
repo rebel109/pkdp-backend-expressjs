@@ -9,6 +9,7 @@ r.use(authenticate);
 
 r.get('/me', authorize('NARASUMBER'), c.myStatus);
 r.post('/submit', authorize('DOSEN','NARASUMBER'), uploadAny.single('consent_file'), c.submit);
+r.post('/resubmit', authorize('NARASUMBER'), uploadAny.single('consent_file'), c.resubmit);
 
 r.get('/admin/submissions', authorize('ADMIN'), c.adminList);
 r.get('/admin/recap', authorize('ADMIN'), c.adminRecap);

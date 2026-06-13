@@ -100,10 +100,13 @@ exports.submit = async (req,res,next)=>{
     if(!period.is_active) return res.status(400).json({message:'Pendaftaran ditutup untuk periode ini. Hubungi Admin.'});
 
     const [existing] = await db.query(
-      'SELECT id FROM narasumber_submissions WHERE user_id=? AND period_id=? LIMIT 1',
+      'SELECT id,status FROM narasumber_submissions WHERE user_id=? AND period_id=? LIMIT 1',
       [req.user.id, periodId]
     );
-    if(existing.length) return res.status(409).json({message:'Narasumber sudah terdaftar pada periode ini'});
+    if(existing.length){
+      if(existing[0].status==='rejected') return res.status(409).json({message:'Pengajuan periode ini pernah ditolak. Silakan kirim ulang surat revisi dari halaman profil.'});
+      return res.status(409).json({message:'Narasumber sudah terdaftar pada periode ini'});
+    }
 
     const consentFile = `/uploads/${req.file.filename}`;
 
@@ -126,6 +129,61 @@ exports.submit = async (req,res,next)=>{
   }catch(err){next(err);}
 };
 
+exports.resubmit = async (req,res,next)=>{
+  try{
+    if(req.user.role!=='NARASUMBER') return res.status(403).json({message:'Akses ditolak'});
+    if(!req.file) return res.status(400).json({message:'Surat revisi wajib diunggah'});
+
+    const periodId = req.body.period_id || req.user.period_id;
+    if(!periodId) return res.status(400).json({message:'Periode pengajuan tidak ditemukan'});
+
+    const [[period]] = await db.query('SELECT id,is_active FROM periods WHERE id=?',[periodId]);
+    if(!period) return res.status(400).json({message:'Periode tidak valid'});
+    if(!period.is_active) return res.status(400).json({message:'Pendaftaran ditutup untuk periode ini. Hubungi Admin.'});
+
+    const [[submission]] = await db.query(
+      `SELECT id,status,consent_file,reject_reason,reviewed_at,reviewed_by,
+              COALESCE(revision_count,0) AS revision_count
+       FROM narasumber_submissions
+       WHERE user_id=? AND period_id=?
+       LIMIT 1`,
+      [req.user.id, periodId]
+    );
+    if(!submission) return res.status(404).json({message:'Pengajuan narasumber pada periode ini tidak ditemukan'});
+    if(submission.status!=='rejected') return res.status(400).json({message:'Hanya pengajuan yang ditolak yang dapat direvisi'});
+
+    const consentFile = `/uploads/${req.file.filename}`;
+
+    await db.query(
+      `UPDATE narasumber_submissions
+       SET consent_file=?,
+           status='pending',
+           reviewed_by=NULL,
+           reviewed_at=NULL,
+           reject_reason=NULL,
+           previous_consent_file=?,
+           last_reject_reason=?,
+           last_rejected_at=?,
+           last_rejected_by=?,
+           resubmitted_at=NOW(),
+           revision_count=COALESCE(revision_count,0)+1
+       WHERE id=?`,
+      [consentFile, submission.consent_file, submission.reject_reason, submission.reviewed_at, submission.reviewed_by, submission.id]
+    );
+
+    await db.query(
+      `UPDATE users
+       SET narasumber_status='pending', narasumber_reject_reason=NULL, narasumber_verified_at=NULL, narasumber_verified_by=NULL, period_id=?
+       WHERE id=?`,
+      [periodId, req.user.id]
+    );
+    await upsertUserPeriodRole(req.user.id, periodId, 'NARASUMBER', 'pending', 'narasumber_submission', submission.id);
+    await saveProfileSnapshot(req.user.id, periodId, 'NARASUMBER', submission.id);
+
+    res.json({message:'Surat revisi berhasil dikirim dan menunggu verifikasi admin'});
+  }catch(err){next(err);}
+};
+
 exports.myStatus = async (req,res,next)=>{
   try{
     const [[u]] = await db.query(
@@ -137,6 +195,7 @@ exports.myStatus = async (req,res,next)=>{
 
     const [[latest]] = await db.query(
       `SELECT ns.id,ns.period_id,ns.consent_file,ns.status,ns.reviewed_by,ns.reviewed_at,ns.reject_reason,ns.created_at,
+              COALESCE(ns.revision_count,0) AS revision_count,ns.resubmitted_at,ns.last_reject_reason,
               p.label AS period_label,p.year AS period_year,
               reviewer.name AS reviewed_by_name
        FROM narasumber_submissions ns
@@ -150,6 +209,7 @@ exports.myStatus = async (req,res,next)=>{
 
     const [history] = await db.query(
       `SELECT ns.id,ns.period_id,ns.consent_file,ns.status,ns.reviewed_by,ns.reviewed_at,ns.reject_reason,ns.created_at,
+              COALESCE(ns.revision_count,0) AS revision_count,ns.resubmitted_at,ns.last_reject_reason,
               p.label AS period_label,p.year AS period_year,
               reviewer.name AS reviewed_by_name
        FROM narasumber_submissions ns
@@ -178,6 +238,7 @@ exports.adminList = async (req,res,next)=>{
 
     const [rows] = await db.query(
       `SELECT ns.id,ns.user_id,ns.period_id,ns.consent_file,ns.status,ns.reviewed_by,ns.reviewed_at,ns.reject_reason,ns.created_at,
+              COALESCE(ns.revision_count,0) AS revision_count,ns.resubmitted_at,ns.last_reject_reason,
               u.name AS user_name,u.email AS user_email,u.narasumber_status,
               p.label AS period_label,
               reviewer.name AS reviewed_by_name
