@@ -503,7 +503,7 @@ exports.assignNarasumber=async(req,res,next)=>{
     if(materialId!=null){
       if(!Number.isInteger(materialId)) return res.status(400).json({message:'material_id tidak valid'});
       const [rows]=await db.query(
-        `SELECT t.id,t.title FROM tasks t
+        `SELECT t.id,t.title,t.assessment_component FROM tasks t
          WHERE t.id=? AND t.class_id=? AND t.phase IN ('OJC','ISC2') AND t.task_type='UPLOAD'`,
         [materialId,classId]
       );
@@ -511,7 +511,7 @@ exports.assignNarasumber=async(req,res,next)=>{
       targetTasks=rows;
     }else{
       const [rows]=await db.query(
-        `SELECT t.id,t.title FROM tasks t
+        `SELECT t.id,t.title,t.assessment_component FROM tasks t
          WHERE t.class_id=? AND t.phase IN ('OJC','ISC2') AND t.task_type='UPLOAD'`,
         [classId]
       );
@@ -522,6 +522,9 @@ exports.assignNarasumber=async(req,res,next)=>{
     const taskIds=targetTasks.map(t=>t.id);
     const taskPh=taskIds.map(()=>'?').join(',');
 
+    // Materi moderasi beragama bersifat pleno: satu narasumber boleh mengisi semua kelas di jam yang sama, jadi lewati cek bentrok.
+    const skipConflictCheck=targetTasks.every(t=>String(t.assessment_component||'').toUpperCase()==='OJC_KONTEN_MODERASI');
+
     const [targetSlots]=await db.query(
       `SELECT DISTINCT ss.id,ss.task_id,ss.slot_date,ss.start_time,ss.end_time
        FROM schedule_slots ss
@@ -530,6 +533,7 @@ exports.assignNarasumber=async(req,res,next)=>{
       [classId,...taskIds]
     );
 
+    if(!skipConflictCheck){
     if(targetSlots.length){
       const [otherSlots]=await db.query(
         `SELECT DISTINCT ss.id,ss.slot_date,ss.start_time,ss.end_time
@@ -585,6 +589,7 @@ exports.assignNarasumber=async(req,res,next)=>{
           }
         }
       }
+    }
     }
 
     const conn=await db.getConnection();
