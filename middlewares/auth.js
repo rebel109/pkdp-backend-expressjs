@@ -34,9 +34,9 @@ const ensureDosenVerificationApproved=async(req,res,next)=>{
 const ensurePaymentVerified=async(req,res,next)=>{
   try{
     if(!req.user) return res.status(401).json({message:'Belum login'});
-    if(req.user.role!=='DOSEN') return next();
-    const [[u]] = await db.query('SELECT payment_status FROM users WHERE id=?',[req.user.id]);
+    const [[u]] = await db.query('SELECT role,payment_status FROM users WHERE id=?',[req.user.id]);
     if(!u) return res.status(404).json({message:'User tidak ditemukan'});
+    if(u.role!=='DOSEN') return next();
     if(u.payment_status!=='verified') return res.status(403).json({message:'Akses dikunci. Selesaikan verifikasi pembayaran terlebih dahulu.'});
     next();
   }catch(err){next(err);}
