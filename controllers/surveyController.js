@@ -272,7 +272,7 @@ const getIsc1ActivationBundles=async(user)=>{
     `SELECT CONCAT('act-',sa.id,'-map-',MIN(sia.id)) AS id,'activation' AS source_type,sa.id AS activation_id,MIN(sia.id) AS mapping_id,
             sa.phase,'PHASE_MAPPING_BUNDLE' AS survey_kind,sa.title,sa.description,sa.period_id,p.label AS period_label,sa.target_role,sa.lock_required,
             COUNT(DISTINCT sbq.id) AS question_count,sar.id AS response_id,sar.submitted_at,sar.submitted_at AS updated_at,
-            CONCAT('Angkatan ',co.cohort_no) AS class_name,
+            COALESCE(CONCAT('Angkatan ',co.cohort_no),'Semua Angkatan') AS class_name,
             CONCAT(COUNT(DISTINCT sia.id),' evaluasi narasumber') AS material_title,
             CONCAT(COUNT(DISTINCT sia.narasumber_id),' narasumber') AS narasumber_name,
             NULL AS category_key,NULL AS category_title,COUNT(DISTINCT sia.narasumber_id) AS narasumber_count,
@@ -281,15 +281,17 @@ const getIsc1ActivationBundles=async(user)=>{
      JOIN periods p ON p.id=sa.period_id
      JOIN survey_activation_mappings sam ON sam.activation_id=sa.id AND sam.isc1_assignment_id IS NOT NULL
      JOIN survey_isc1_assignments sia ON sia.id=sam.isc1_assignment_id AND sia.is_active=1
-     JOIN cohorts co ON co.id=sia.cohort_id
+     LEFT JOIN cohorts co ON co.id=sia.cohort_id
      LEFT JOIN survey_bank_questions sbq ON sbq.bank_id=sia.bank_id
      LEFT JOIN survey_activation_responses sar ON sar.activation_id=sa.id AND sar.user_id=? AND sar.mapping_id IS NULL
      WHERE ${activeWindowWhere} AND sa.phase='ISC1' AND sa.target_role=?
-       AND sia.cohort_id IN (
-         SELECT DISTINCT c.cohort_id
-         FROM class_members cm
-         JOIN classes c ON c.id=cm.class_id
-         WHERE cm.user_id=? AND c.cohort_id IS NOT NULL
+       AND (
+         sia.cohort_id IS NULL OR sia.cohort_id IN (
+           SELECT DISTINCT c.cohort_id
+           FROM class_members cm
+           JOIN classes c ON c.id=cm.class_id
+           WHERE cm.user_id=? AND c.cohort_id IS NOT NULL
+         )
        )
      GROUP BY sa.id,sar.id,co.cohort_no
      ORDER BY sa.id DESC`,
@@ -327,7 +329,7 @@ const getActivationDetail=async({token,user})=>{
     if(user.role!=='DOSEN') return null;
     const[[row]]=await db.query(
       `SELECT sa.*,p.label AS period_label,'activation' AS source_type,NULL AS mapping_id,
-              CONCAT('Angkatan ',co.cohort_no) AS class_name,
+              COALESCE(CONCAT('Angkatan ',co.cohort_no),'Semua Angkatan') AS class_name,
               CONCAT(COUNT(DISTINCT sia.id),' evaluasi narasumber') AS material_title,
               CONCAT(COUNT(DISTINCT sia.narasumber_id),' narasumber') AS narasumber_name,
               NULL AS category_key,NULL AS category_title,
@@ -337,14 +339,16 @@ const getActivationDetail=async({token,user})=>{
        JOIN periods p ON p.id=sa.period_id
        JOIN survey_activation_mappings sam ON sam.activation_id=sa.id AND sam.isc1_assignment_id IS NOT NULL
        JOIN survey_isc1_assignments sia ON sia.id=sam.isc1_assignment_id AND sia.is_active=1
-       JOIN cohorts co ON co.id=sia.cohort_id
+       LEFT JOIN cohorts co ON co.id=sia.cohort_id
        LEFT JOIN survey_activation_responses sar ON sar.activation_id=sa.id AND sar.user_id=? AND sar.mapping_id IS NULL
        WHERE ${activeWindowWhere} AND sa.id=? AND sa.phase='ISC1' AND sa.target_role=?
-         AND sia.cohort_id IN (
-           SELECT DISTINCT c.cohort_id
-           FROM class_members cm
-           JOIN classes c ON c.id=cm.class_id
-           WHERE cm.user_id=? AND c.cohort_id IS NOT NULL
+         AND (
+           sia.cohort_id IS NULL OR sia.cohort_id IN (
+             SELECT DISTINCT c.cohort_id
+             FROM class_members cm
+             JOIN classes c ON c.id=cm.class_id
+             WHERE cm.user_id=? AND c.cohort_id IS NOT NULL
+           )
          )
        GROUP BY sa.id,sar.id,co.cohort_no
        LIMIT 1`,
@@ -353,19 +357,21 @@ const getActivationDetail=async({token,user})=>{
     if(!row) return null;
     const[questions]=await db.query('SELECT * FROM survey_bank_questions WHERE bank_id=? ORDER BY order_no,id',[row.effective_bank_id]);
     const[matrixRows]=await db.query(
-      `SELECT sia.id,CONCAT('Angkatan ',co.cohort_no) AS class_name,co.id AS cohort_id,co.cohort_no,sim.name AS material_title,NULL AS task_id,
+      `SELECT sia.id,COALESCE(CONCAT('Angkatan ',co.cohort_no),'Semua Angkatan') AS class_name,co.id AS cohort_id,co.cohort_no,sim.name AS material_title,NULL AS task_id,
               sin.id AS narasumber_id,sin.name AS narasumber_name,sia.bank_id,sam.activation_id
        FROM survey_activation_mappings sam
        JOIN survey_isc1_assignments sia ON sia.id=sam.isc1_assignment_id AND sia.is_active=1
-       JOIN cohorts co ON co.id=sia.cohort_id
-       JOIN survey_isc1_materials sim ON sim.id=sia.material_id
-       JOIN survey_isc1_narasumbers sin ON sin.id=sia.narasumber_id
+       LEFT JOIN cohorts co ON co.id=sia.cohort_id
+       LEFT JOIN survey_isc1_materials sim ON sim.id=sia.material_id
+       LEFT JOIN survey_isc1_narasumbers sin ON sin.id=sia.narasumber_id
        WHERE sam.activation_id=?
-         AND sia.cohort_id IN (
-           SELECT DISTINCT c.cohort_id
-           FROM class_members cm
-           JOIN classes c ON c.id=cm.class_id
-           WHERE cm.user_id=? AND c.cohort_id IS NOT NULL
+         AND (
+           sia.cohort_id IS NULL OR sia.cohort_id IN (
+             SELECT DISTINCT c.cohort_id
+             FROM class_members cm
+             JOIN classes c ON c.id=cm.class_id
+             WHERE cm.user_id=? AND c.cohort_id IS NOT NULL
+           )
          )
        ORDER BY co.cohort_no,sim.name,sin.name,sia.id`,
       [parsed.activationId,user.id]
@@ -418,31 +424,33 @@ const getActivationAdminDetail=async({token,targetRole})=>{
   if(parsed.mappingId){
     const[[row]]=await db.query(
       `SELECT sa.*,p.label AS period_label,'activation' AS source_type,NULL AS mapping_id,
-              CONCAT('Angkatan ',co.cohort_no) AS class_name,
+              COALESCE(CONCAT('Angkatan ',co.cohort_no),'Semua Angkatan') AS class_name,
               CONCAT(COUNT(DISTINCT sia.id),' evaluasi narasumber') AS material_title,
               CONCAT(COUNT(DISTINCT sia.narasumber_id),' narasumber') AS narasumber_name,
               NULL AS category_key,NULL AS category_title,
-              COALESCE(MIN(sia.bank_id),sa.bank_id) AS effective_bank_id
+              COALESCE(MIN(sia.bank_id),sa.bank_id) AS effective_bank_id,
+              sb.title AS bank_title
        FROM survey_activations sa
        JOIN periods p ON p.id=sa.period_id
        JOIN survey_activation_mappings sam ON sam.activation_id=sa.id AND sam.isc1_assignment_id IS NOT NULL
        JOIN survey_isc1_assignments sia ON sia.id=sam.isc1_assignment_id AND sia.is_active=1
-       JOIN cohorts co ON co.id=sia.cohort_id
+       LEFT JOIN survey_banks sb ON sb.id=COALESCE(sia.bank_id,sa.bank_id)
+       LEFT JOIN cohorts co ON co.id=sia.cohort_id
        WHERE sa.id=? AND sa.phase='ISC1' AND sa.target_role=?
-       GROUP BY sa.id,co.cohort_no
+       GROUP BY sa.id,co.cohort_no,sb.title
        LIMIT 1`,
       [parsed.activationId,targetRole]
     );
     if(!row) return null;
     const[questions]=await db.query('SELECT * FROM survey_bank_questions WHERE bank_id=? ORDER BY order_no,id',[row.effective_bank_id]);
     const[matrixRows]=await db.query(
-      `SELECT sia.id,CONCAT('Angkatan ',co.cohort_no) AS class_name,co.id AS cohort_id,co.cohort_no,sim.name AS material_title,NULL AS task_id,
+      `SELECT sia.id,COALESCE(CONCAT('Angkatan ',co.cohort_no),'Semua Angkatan') AS class_name,co.id AS cohort_id,co.cohort_no,sim.name AS material_title,NULL AS task_id,
               sin.id AS narasumber_id,sin.name AS narasumber_name,sia.bank_id,sam.activation_id
        FROM survey_activation_mappings sam
        JOIN survey_isc1_assignments sia ON sia.id=sam.isc1_assignment_id AND sia.is_active=1
-       JOIN cohorts co ON co.id=sia.cohort_id
-       JOIN survey_isc1_materials sim ON sim.id=sia.material_id
-       JOIN survey_isc1_narasumbers sin ON sin.id=sia.narasumber_id
+       LEFT JOIN cohorts co ON co.id=sia.cohort_id
+       LEFT JOIN survey_isc1_materials sim ON sim.id=sia.material_id
+       LEFT JOIN survey_isc1_narasumbers sin ON sin.id=sia.narasumber_id
        WHERE sam.activation_id=?
        ORDER BY co.cohort_no,sim.name,sin.name,sia.id`,
       [parsed.activationId]
@@ -793,7 +801,7 @@ const getAdminRecapData=async({period_id,target_role,survey_instance_id})=>{
     }
     const respondedCount=details.length;
     return {
-      survey:activationDetail,
+      survey:{...activationDetail,bank_title:activationDetail.bank_title||activationDetail.title||null},
       questions,
       summary:{
         total_target:totalTarget,
@@ -810,9 +818,10 @@ const getAdminRecapData=async({period_id,target_role,survey_instance_id})=>{
   if(String(survey_instance_id).startsWith('eval-')){
     const sessionId=Number(String(survey_instance_id).replace('eval-',''));
     const[[session]]=await db.query(
-      `SELECT ses.*,si.id AS survey_instance_id,si.bank_id,si.period_id,si.target_role,si.survey_kind,si.title,si.description,c.name AS class_name
+      `SELECT ses.*,si.id AS survey_instance_id,si.bank_id,si.period_id,si.target_role,si.survey_kind,si.title,si.description,sb.title AS bank_title,c.name AS class_name
        FROM survey_eval_sessions ses
        JOIN survey_instances si ON si.id=ses.survey_instance_id
+       LEFT JOIN survey_banks sb ON sb.id=si.bank_id
        JOIN classes c ON c.id=ses.class_id
        WHERE ses.id=? AND ses.period_id=? AND si.target_role=? AND si.survey_kind='EVAL_NARASUMBER'`,
       [sessionId,period_id,target_role]
@@ -826,8 +835,9 @@ const getAdminRecapData=async({period_id,target_role,survey_instance_id})=>{
   }
 
   const[[survey]]=await db.query(
-    `SELECT si.*
+    `SELECT si.*,sb.title AS bank_title
      FROM survey_instances si
+     LEFT JOIN survey_banks sb ON sb.id=si.bank_id
      WHERE si.id=? AND si.period_id=? AND si.target_role=? AND si.survey_kind='GENERAL'`,
     [survey_instance_id,period_id,target_role]
   );

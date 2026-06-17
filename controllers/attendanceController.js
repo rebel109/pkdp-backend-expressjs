@@ -363,9 +363,7 @@ exports.markAttendance=async(req,res,next)=>{
 const buildAdminRecapData=async(query={})=>{
   await ensureSchema();
   const{period_id,class_id,phase,role}=query;
-  let rowWhere=`WHERE ((t.phase='ISC1' AND t.task_type IN ('PRETEST','POSTTEST')) OR (t.phase IN ('OJC','ISC2') AND t.task_type='UPLOAD') OR (t.phase='OJC' AND t.task_type='BRIEFING'))`;
   let taskWhere=`WHERE ((t.phase='ISC1' AND t.task_type IN ('PRETEST','POSTTEST')) OR (t.phase IN ('OJC','ISC2') AND t.task_type='UPLOAD') OR (t.phase='OJC' AND t.task_type='BRIEFING'))`;
-  const rowParams=[];
   const taskParams=[];
 
   let selectedClass=null;
@@ -375,34 +373,12 @@ const buildAdminRecapData=async(query={})=>{
   }
 
   if(period_id){
-    rowWhere+=' AND t.period_id=?';
     taskWhere+=' AND t.period_id=?';
-    rowParams.push(period_id);
     taskParams.push(period_id);
   }
 
   if(class_id){
     if(selectedClass&&selectedClass.phase!=='ISC1'){
-      rowWhere+=` AND (
-        COALESCE(t.class_id,participant_class.id)=?
-        OR (
-          tar.attendance_role='DOSEN'
-          AND t.phase='ISC1'
-          AND t.class_id IN (
-            SELECT DISTINCT pr2.selected_class_id
-            FROM class_members cm2
-            JOIN profiles pr2 ON pr2.user_id=cm2.user_id
-            WHERE cm2.class_id=? AND pr2.selected_class_id IS NOT NULL
-          )
-          AND tar.user_id IN (SELECT user_id FROM class_members WHERE class_id=?)
-        )
-        OR (
-          tar.attendance_role='DOSEN'
-          AND t.phase='OJC'
-          AND t.task_type='BRIEFING'
-          AND t.class_id=?
-        )
-      )`;
       taskWhere+=` AND (
         t.class_id=?
         OR (
@@ -420,55 +396,21 @@ const buildAdminRecapData=async(query={})=>{
           AND t.class_id=?
         )
       )`;
-      rowParams.push(class_id,class_id,class_id,class_id);
       taskParams.push(class_id,class_id,class_id);
     }else{
-      rowWhere+=' AND COALESCE(t.class_id,participant_class.id)=?';
       taskWhere+=' AND t.class_id=?';
-      rowParams.push(class_id);
       taskParams.push(class_id);
     }
   }
 
   if(phase){
-    rowWhere+=' AND t.phase=?';
     taskWhere+=' AND t.phase=?';
-    rowParams.push(phase);
     taskParams.push(phase);
   }
 
-  const[rows]=await db.query(
-    `SELECT tar.id,tar.attendance_role,tar.attended_at,
-            u.id AS user_id,u.name,
-            COALESCE(c.id,participant_class.id) AS class_id,
-            COALESCE(c.name,participant_class.name) AS class_name,
-            COALESCE(c.phase,participant_class.phase) AS class_phase,
-            participant_cohort.cohort_no,
-            selected_class.id AS selected_class_id,
-            selected_class.name AS selected_class_name,
-            selected_class.phase AS selected_class_phase,
-            t.id AS task_id,t.title AS material_name,t.task_type,t.phase,
-            t.pretest_open,t.pretest_close,t.posttest_open,t.posttest_close,t.upload_open,t.upload_close,
-            tas.is_open_override
-     FROM task_attendance_records tar
-     JOIN users u ON u.id=tar.user_id
-     JOIN tasks t ON t.id=tar.task_id
-     LEFT JOIN classes c ON c.id=t.class_id
-     LEFT JOIN profiles pr ON pr.user_id=tar.user_id AND tar.attendance_role='DOSEN'
-     LEFT JOIN classes selected_class ON selected_class.id=pr.selected_class_id
-     LEFT JOIN class_members participant_cm ON participant_cm.user_id=tar.user_id AND tar.attendance_role='DOSEN' AND t.phase='ISC1' AND participant_cm.class_id IN (SELECT id FROM classes WHERE phase='ISC1')
-     LEFT JOIN classes participant_class ON participant_class.id=participant_cm.class_id AND participant_class.phase='ISC1'
-     LEFT JOIN cohorts participant_cohort ON participant_cohort.id=COALESCE(participant_class.cohort_id,selected_class.cohort_id)
-     LEFT JOIN task_attendance_settings tas ON tas.task_id=t.id
-     ${rowWhere}
-     ${role?' AND tar.attendance_role=?':''}
-     ORDER BY tar.attended_at DESC,u.name ASC`,
-    role?[...rowParams,role]:rowParams
-  );
-
   const[tasks]=await db.query(
     `SELECT t.id,t.title,t.phase,t.class_id,t.material_id,t.task_type,t.assessment_component,t.order_no,
-            c.name AS class_name,co.cohort_no,
+            c.name AS class_name,c.phase AS class_phase,co.cohort_no,
             t.pretest_open,t.pretest_close,t.posttest_open,t.posttest_close,t.upload_open,t.upload_close,
             tas.is_open_override,
             COUNT(DISTINCT CASE WHEN tar.attendance_role='DOSEN' THEN tar.user_id END) AS peserta_hadir,
@@ -479,30 +421,168 @@ const buildAdminRecapData=async(query={})=>{
      LEFT JOIN task_attendance_settings tas ON tas.task_id=t.id
      LEFT JOIN task_attendance_records tar ON tar.task_id=t.id
      ${taskWhere}
-     GROUP BY t.id,c.name,co.cohort_no,tas.is_open_override
+     GROUP BY t.id,c.name,c.phase,co.cohort_no,tas.is_open_override
      ORDER BY FIELD(t.phase,'ISC1','OJC','ISC2'),t.order_no,t.id`,
     taskParams
   );
 
+  const taskIds=tasks.map(task=>task.id);
+  const taskGroupMap=new Map();
+  tasks.forEach(task=>{
+    const key=buildMaterialKey(task);
+    if(!taskGroupMap.has(key)) taskGroupMap.set(key,new Set());
+    taskGroupMap.get(key).add(task.id);
+  });
+  const taskGroupIdsByTaskId=new Map();
+  tasks.forEach(task=>{
+    taskGroupIdsByTaskId.set(task.id,taskGroupMap.get(buildMaterialKey(task))||new Set([task.id]));
+  });
+
+  let participantRows=[];
+  if(role!=='NARASUMBER'&&period_id){
+    let participantQ=`SELECT cm.user_id,u.name,
+                             cm.class_id AS member_class_id,member_class.name AS member_class_name,member_class.phase AS member_class_phase,
+                             selected_class.id AS selected_class_id,selected_class.name AS selected_class_name,selected_class.phase AS selected_class_phase,
+                             participant_cohort.cohort_no
+                      FROM class_members cm
+                      JOIN users u ON u.id=cm.user_id AND u.role='DOSEN' AND u.payment_status='verified' AND u.period_id=?
+                      JOIN classes member_class ON member_class.id=cm.class_id
+                      LEFT JOIN profiles pr ON pr.user_id=u.id
+                      LEFT JOIN classes selected_class ON selected_class.id=pr.selected_class_id
+                      LEFT JOIN cohorts participant_cohort ON participant_cohort.id=COALESCE(member_class.cohort_id,selected_class.cohort_id)
+                      WHERE member_class.period_id=?`;
+    const participantParams=[period_id,period_id];
+    if(class_id){participantQ+=' AND cm.class_id=?';participantParams.push(class_id);}
+    if(phase&&phase!=='ISC1'){participantQ+=' AND member_class.phase=?';participantParams.push(phase);}
+    participantQ+=' ORDER BY u.name';
+    const[participantMemberships]=await db.query(participantQ,participantParams);
+
+    const participantMap=new Map();
+    participantMemberships.forEach(row=>{
+      if(!participantMap.has(row.user_id)){
+        participantMap.set(row.user_id,{
+          user_id:row.user_id,
+          name:row.name,
+          cohort_no:row.cohort_no,
+          class_id:row.member_class_id,
+          class_name:row.member_class_name,
+          class_phase:row.member_class_phase,
+          selected_class_id:row.selected_class_id,
+          selected_class_name:row.selected_class_name,
+          selected_class_phase:row.selected_class_phase,
+          classIds:new Set()
+        });
+      }
+      const participant=participantMap.get(row.user_id);
+      participant.classIds.add(row.member_class_id);
+      if((!participant.cohort_no&&participant.cohort_no!==0)&&row.cohort_no!=null) participant.cohort_no=row.cohort_no;
+      if(!participant.class_name&&row.member_class_name){
+        participant.class_id=row.member_class_id;
+        participant.class_name=row.member_class_name;
+        participant.class_phase=row.member_class_phase;
+      }
+      if(!participant.selected_class_name&&row.selected_class_name){
+        participant.selected_class_id=row.selected_class_id;
+        participant.selected_class_name=row.selected_class_name;
+        participant.selected_class_phase=row.selected_class_phase;
+      }
+    });
+
+    participantRows=[...participantMap.values()].flatMap(participant=>
+      tasks.filter(task=>task.phase==='ISC1'||participant.classIds.has(task.class_id)).map(task=>({
+        id:null,
+        user_id:participant.user_id,
+        task_id:task.id,
+        role:'DOSEN',
+        name:participant.name,
+        cohort_no:participant.cohort_no,
+        class_id:task.class_id||participant.class_id,
+        class_name:task.class_name||participant.class_name,
+        class_phase:task.class_phase||participant.class_phase,
+        selected_class_id:participant.selected_class_id,
+        selected_class_name:participant.selected_class_name,
+        selected_class_phase:participant.selected_class_phase,
+        material_name:task.title,
+        task_type:task.task_type,
+        phase:task.phase,
+        attended_at:null
+      }))
+    );
+  }
+
+  let narasumberRows=[];
+  if(role!=='DOSEN'&&period_id){
+    let assignQ=`SELECT DISTINCT cn.narasumber_id AS user_id,u.name,cn.class_id,cn.material_id,
+                        c.name AS class_name,c.phase AS class_phase,co.cohort_no
+                 FROM class_narasumber cn
+                 JOIN users u ON u.id=cn.narasumber_id AND u.role='NARASUMBER'
+                 JOIN classes c ON c.id=cn.class_id
+                 LEFT JOIN cohorts co ON co.id=c.cohort_id
+                 WHERE c.period_id=?`;
+    const assignParams=[period_id];
+    if(class_id){assignQ+=' AND cn.class_id=?';assignParams.push(class_id);}
+    if(phase&&phase!=='ISC1'){assignQ+=' AND c.phase=?';assignParams.push(phase);}
+    assignQ+=' ORDER BY u.name,c.name';
+    const[assignments]=await db.query(assignQ,assignParams);
+
+    narasumberRows=assignments.flatMap(assignment=>
+      tasks.filter(task=>{
+        if(task.class_id!==assignment.class_id) return false;
+        if(task.phase==='ISC1') return false;
+        const taskGroupIds=taskGroupIdsByTaskId.get(task.id)||new Set([task.id]);
+        return assignment.material_id==null||assignment.material_id===task.id||assignment.material_id===task.material_id||taskGroupIds.has(assignment.material_id);
+      }).map(task=>({
+        id:null,
+        user_id:assignment.user_id,
+        task_id:task.id,
+        role:'NARASUMBER',
+        name:assignment.name,
+        cohort_no:assignment.cohort_no,
+        class_id:task.class_id,
+        class_name:task.class_name,
+        class_phase:task.class_phase,
+        selected_class_id:null,
+        selected_class_name:null,
+        selected_class_phase:null,
+        material_name:task.title,
+        task_type:task.task_type,
+        phase:task.phase,
+        attended_at:null
+      }))
+    );
+  }
+
+  const allRows=[...participantRows,...narasumberRows];
+  const userIds=[...new Set(allRows.map(row=>row.user_id))];
+  let attendanceRows=[];
+  if(taskIds.length&&userIds.length){
+    const taskPlaceholders=taskIds.map(()=>'?').join(',');
+    const userPlaceholders=userIds.map(()=>'?').join(',');
+    const[aRows]=await db.query(
+      `SELECT id,task_id,user_id,attendance_role,attended_at
+       FROM task_attendance_records
+       WHERE task_id IN (${taskPlaceholders}) AND user_id IN (${userPlaceholders})`,
+      [...taskIds,...userIds]
+    );
+    attendanceRows=aRows;
+  }
+
+  const attendanceMap=new Map();
+  attendanceRows.forEach(row=>{
+    attendanceMap.set(`${row.attendance_role}-${row.user_id}-${row.task_id}`,row);
+  });
+
+  const rows=allRows.map(row=>{
+    const attendance=attendanceMap.get(`${row.role}-${row.user_id}-${row.task_id}`);
+    return{
+      ...row,
+      id:attendance?.id||null,
+      attended_at:toIsoOrNull(attendance?.attended_at)||null
+    };
+  }).sort((a,b)=>(Number(a.cohort_no)||9999)-(Number(b.cohort_no)||9999)||String(a.name||'').localeCompare(String(b.name||''),'id-ID')||String(a.role||'').localeCompare(String(b.role||''),'id-ID')||String(a.phase||'').localeCompare(String(b.phase||''),'id-ID')||String(a.material_name||'').localeCompare(String(b.material_name||''),'id-ID'));
+
   return {
-    rows:rows.map(row=>({
-      id:row.id,
-      user_id:row.user_id,
-      task_id:row.task_id,
-      role:row.attendance_role,
-      name:row.name,
-      cohort_no:row.cohort_no,
-      class_id:row.class_id,
-      class_name:row.class_name,
-      class_phase:row.class_phase,
-      selected_class_id:row.selected_class_id,
-      selected_class_name:row.selected_class_name,
-      selected_class_phase:row.selected_class_phase,
-      material_name:row.material_name,
-      task_type:row.task_type,
-      phase:row.phase,
-      attended_at:toIsoOrNull(row.attended_at)
-    })),
+    rows,
     tasks:groupAttendanceItems(tasks,{mergeCounts:true}).map(task=>({
       task_id:task.id,
       task_ids:task.task_ids,
@@ -573,7 +653,7 @@ const buildAttendanceSummary=(rows,tasks)=>{
     }).map(task=>{
       const taskIds=task.task_ids?.length?task.task_ids:[task.task_id];
       const attendance=taskIds.map(id=>person.attendanceByTask.get(String(id))).find(Boolean);
-      return {task_id:task.task_id,label:taskLabel(task),attended:Boolean(attendance),attended_at:attendance?.attended_at||null};
+      return {task_id:task.task_id,label:taskLabel(task),attended:Boolean(attendance?.attended_at),attended_at:attendance?.attended_at||null};
     });
     return {...person,attendedCount:details.filter(item=>item.attended).length,totalTasks:details.length,details};
   }).sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),'id-ID')||String(a.role||'').localeCompare(String(b.role||''),'id-ID'));

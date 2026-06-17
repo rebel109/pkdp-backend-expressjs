@@ -7,9 +7,9 @@ const validCategory=key=>['narasumber','panitia','sarpras','lainnya'].includes(S
 const assignmentSelect=`SELECT sia.*,p.label AS period_label,co.cohort_no,sim.name AS material_name,sin.name AS narasumber_name,sb.title AS bank_title
   FROM survey_isc1_assignments sia
   JOIN periods p ON p.id=sia.period_id
-  JOIN cohorts co ON co.id=sia.cohort_id
-  JOIN survey_isc1_materials sim ON sim.id=sia.material_id
-  JOIN survey_isc1_narasumbers sin ON sin.id=sia.narasumber_id
+  LEFT JOIN cohorts co ON co.id=sia.cohort_id
+  LEFT JOIN survey_isc1_materials sim ON sim.id=sia.material_id
+  LEFT JOIN survey_isc1_narasumbers sin ON sin.id=sia.narasumber_id
   JOIN survey_banks sb ON sb.id=sia.bank_id`;
 
 exports.getIsc1Materials=async(req,res,next)=>{
@@ -130,26 +130,39 @@ exports.getMappings=async(req,res,next)=>{
     if(is_active!==undefined&&is_active!==''){q+=' AND sia.is_active=?';params.push(Number(is_active)?1:0);}
     q+=' ORDER BY co.cohort_no,sim.name,sin.name,sia.id';
     const[rows]=await db.query(q,params);
-    res.json(rows.map(r=>({...r,class_id:r.cohort_id,class_name:r.cohort_no?`Angkatan ${r.cohort_no}`:'Tanpa Angkatan',material_title:r.material_name})));
+    res.json(rows.map(r=>({...r,class_id:r.cohort_id,class_name:r.cohort_no?`Angkatan ${r.cohort_no}`:'Semua Angkatan',material_title:r.material_name})));
   }catch(e){next(e);}
 };
 
 exports.createMapping=async(req,res,next)=>{
   try{
     const{phase,period_id,class_id,material_title,narasumber_id,bank_id,is_active}=req.body;
-    if(!validPhase(phase)||!period_id||!class_id||!material_title||!narasumber_id||!bank_id) return res.status(400).json({message:'phase, period_id, angkatan, materi, narasumber, bank_id wajib'});
-    const[[cohort]]=await db.query('SELECT id,period_id FROM cohorts WHERE id=? AND period_id=?',[class_id,period_id]);
-    if(!cohort) return res.status(400).json({message:'Angkatan tidak valid untuk periode'});
-    const[[material]]=await db.query('SELECT id,name FROM survey_isc1_materials WHERE id=? AND period_id=? AND is_active=1',[material_title,period_id]);
-    if(!material) return res.status(400).json({message:'Materi ISC1 tidak valid'});
-    const[[narasumber]]=await db.query('SELECT id,name FROM survey_isc1_narasumbers WHERE id=? AND period_id=? AND is_active=1',[narasumber_id,period_id]);
-    if(!narasumber) return res.status(400).json({message:'Narasumber ISC1 tidak valid'});
+    if(!validPhase(phase)||!period_id||!bank_id) return res.status(400).json({message:'phase, period_id, dan bank_id wajib'});
+    const normalizedClassId=String(class_id||'').trim();
+    const normalizedMaterialId=String(material_title||'').trim();
+    const normalizedNarasumberId=String(narasumber_id||'').trim();
+    let cohortId=null,materialId=null,narasumberDbId=null;
+    if(normalizedClassId){
+      const[[cohort]]=await db.query('SELECT id,period_id FROM cohorts WHERE id=? AND period_id=?',[normalizedClassId,period_id]);
+      if(!cohort) return res.status(400).json({message:'Angkatan tidak valid untuk periode'});
+      cohortId=cohort.id;
+    }
+    if(normalizedMaterialId){
+      const[[material]]=await db.query('SELECT id,name FROM survey_isc1_materials WHERE id=? AND period_id=? AND is_active=1',[normalizedMaterialId,period_id]);
+      if(!material) return res.status(400).json({message:'Materi ISC1 tidak valid'});
+      materialId=material.id;
+    }
+    if(normalizedNarasumberId){
+      const[[narasumber]]=await db.query('SELECT id,name FROM survey_isc1_narasumbers WHERE id=? AND period_id=? AND is_active=1',[normalizedNarasumberId,period_id]);
+      if(!narasumber) return res.status(400).json({message:'Narasumber ISC1 tidak valid'});
+      narasumberDbId=narasumber.id;
+    }
     const[[bank]]=await db.query('SELECT id FROM survey_banks WHERE id=?',[bank_id]);
     if(!bank) return res.status(400).json({message:'Bank instrumen tidak valid'});
     const[r]=await db.query(
       `INSERT INTO survey_isc1_assignments (period_id,cohort_id,material_id,narasumber_id,bank_id,is_active,created_by)
        VALUES (?,?,?,?,?,?,?)`,
-      [period_id,class_id,material.id,narasumber.id,bank_id,is_active===undefined?1:(is_active?1:0),req.user.id]
+      [period_id,cohortId,materialId,narasumberDbId,bank_id,is_active===undefined?1:(is_active?1:0),req.user.id]
     );
     res.status(201).json({message:'Survei ISC1 dibuat',id:r.insertId});
   }catch(e){
@@ -162,20 +175,33 @@ exports.updateMapping=async(req,res,next)=>{
   try{
     const id=Number(req.params.id);
     const{phase,period_id,class_id,material_title,narasumber_id,bank_id,is_active}=req.body;
-    if(!id||!validPhase(phase)||!period_id||!class_id||!material_title||!narasumber_id||!bank_id) return res.status(400).json({message:'Data survei ISC1 tidak lengkap'});
+    if(!id||!validPhase(phase)||!period_id||!bank_id) return res.status(400).json({message:'Data survei ISC1 tidak lengkap'});
     const[[exists]]=await db.query('SELECT id FROM survey_isc1_assignments WHERE id=?',[id]);
     if(!exists) return res.status(404).json({message:'Survei ISC1 tidak ditemukan'});
-    const[[cohort]]=await db.query('SELECT id,period_id FROM cohorts WHERE id=? AND period_id=?',[class_id,period_id]);
-    if(!cohort) return res.status(400).json({message:'Angkatan tidak valid untuk periode'});
-    const[[material]]=await db.query('SELECT id FROM survey_isc1_materials WHERE id=? AND period_id=?',[material_title,period_id]);
-    if(!material) return res.status(400).json({message:'Materi ISC1 tidak valid'});
-    const[[narasumber]]=await db.query('SELECT id FROM survey_isc1_narasumbers WHERE id=? AND period_id=?',[narasumber_id,period_id]);
-    if(!narasumber) return res.status(400).json({message:'Narasumber ISC1 tidak valid'});
+    const normalizedClassId=String(class_id||'').trim();
+    const normalizedMaterialId=String(material_title||'').trim();
+    const normalizedNarasumberId=String(narasumber_id||'').trim();
+    let cohortId=null,materialId=null,narasumberDbId=null;
+    if(normalizedClassId){
+      const[[cohort]]=await db.query('SELECT id,period_id FROM cohorts WHERE id=? AND period_id=?',[normalizedClassId,period_id]);
+      if(!cohort) return res.status(400).json({message:'Angkatan tidak valid untuk periode'});
+      cohortId=cohort.id;
+    }
+    if(normalizedMaterialId){
+      const[[material]]=await db.query('SELECT id FROM survey_isc1_materials WHERE id=? AND period_id=?',[normalizedMaterialId,period_id]);
+      if(!material) return res.status(400).json({message:'Materi ISC1 tidak valid'});
+      materialId=material.id;
+    }
+    if(normalizedNarasumberId){
+      const[[narasumber]]=await db.query('SELECT id FROM survey_isc1_narasumbers WHERE id=? AND period_id=?',[normalizedNarasumberId,period_id]);
+      if(!narasumber) return res.status(400).json({message:'Narasumber ISC1 tidak valid'});
+      narasumberDbId=narasumber.id;
+    }
     const[[bank]]=await db.query('SELECT id FROM survey_banks WHERE id=?',[bank_id]);
     if(!bank) return res.status(400).json({message:'Bank instrumen tidak valid'});
     await db.query(
       `UPDATE survey_isc1_assignments SET period_id=?,cohort_id=?,material_id=?,narasumber_id=?,bank_id=?,is_active=? WHERE id=?`,
-      [period_id,class_id,material.id,narasumber.id,bank_id,is_active?1:0,id]
+      [period_id,cohortId,materialId,narasumberDbId,bank_id,is_active?1:0,id]
     );
     res.json({message:'Survei ISC1 diperbarui'});
   }catch(e){
