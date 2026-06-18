@@ -13,6 +13,16 @@ r.post('/isc1-narasumbers',ensureBodyPeriodActive,c.createIsc1Narasumber);
 r.put('/isc1-narasumbers/:id',ensureBodyPeriodActive,c.updateIsc1Narasumber);
 r.delete('/isc1-narasumbers/:id',c.removeIsc1Narasumber);
 
+r.get('/ojc-materials',c.getOjcMaterials);
+r.post('/ojc-materials',ensureBodyPeriodActive,c.createOjcMaterial);
+r.put('/ojc-materials/:id',ensureBodyPeriodActive,c.updateOjcMaterial);
+r.delete('/ojc-materials/:id',c.removeOjcMaterial);
+
+r.get('/ojc-narasumbers',c.getOjcNarasumbers);
+r.post('/ojc-narasumbers',ensureBodyPeriodActive,c.createOjcNarasumber);
+r.put('/ojc-narasumbers/:id',ensureBodyPeriodActive,c.updateOjcNarasumber);
+r.delete('/ojc-narasumbers/:id',c.removeOjcNarasumber);
+
 r.get('/mappings',c.getMappings);
 r.post('/mappings',ensureBodyPeriodActive,c.createMapping);
 r.put('/mappings/:id',ensureBodyPeriodActive,c.updateMapping);

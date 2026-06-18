@@ -284,7 +284,7 @@ const getIsc1ActivationBundles=async(user)=>{
      LEFT JOIN cohorts co ON co.id=sia.cohort_id
      LEFT JOIN survey_bank_questions sbq ON sbq.bank_id=sia.bank_id
      LEFT JOIN survey_activation_responses sar ON sar.activation_id=sa.id AND sar.user_id=? AND sar.mapping_id IS NULL
-     WHERE ${activeWindowWhere} AND sa.phase='ISC1' AND sa.target_role=?
+     WHERE ${activeWindowWhere} AND sa.target_role=?
        AND (
          sia.cohort_id IS NULL OR sia.cohort_id IN (
            SELECT DISTINCT c.cohort_id
@@ -314,6 +314,7 @@ const getActivationObligations=async(user)=>{
      LEFT JOIN survey_bank_questions sbq ON sbq.bank_id=sa.bank_id
      LEFT JOIN survey_activation_responses sar ON sar.activation_id=sa.id AND sar.user_id=? AND sar.mapping_id IS NULL
      WHERE ${activeWindowWhere} AND sa.phase='OJC' AND sa.target_role=?
+       AND NOT EXISTS (SELECT 1 FROM survey_activation_mappings sam2 WHERE sam2.activation_id=sa.id AND sam2.isc1_assignment_id IS NOT NULL)
      GROUP BY sa.id,sar.id
      ORDER BY sa.id DESC`,
     [user.id,user.role]
@@ -341,7 +342,7 @@ const getActivationDetail=async({token,user})=>{
        JOIN survey_isc1_assignments sia ON sia.id=sam.isc1_assignment_id AND sia.is_active=1
        LEFT JOIN cohorts co ON co.id=sia.cohort_id
        LEFT JOIN survey_activation_responses sar ON sar.activation_id=sa.id AND sar.user_id=? AND sar.mapping_id IS NULL
-       WHERE ${activeWindowWhere} AND sa.id=? AND sa.phase='ISC1' AND sa.target_role=?
+       WHERE ${activeWindowWhere} AND sa.id=? AND sa.target_role=?
          AND (
            sia.cohort_id IS NULL OR sia.cohort_id IN (
              SELECT DISTINCT c.cohort_id
@@ -386,7 +387,7 @@ const getActivationDetail=async({token,user})=>{
       activation_id:row.id,
       id:token,
       survey_kind:'PHASE_MAPPING_BUNDLE',
-      phase:'ISC1',
+      phase:String(row.phase||'ISC1').toUpperCase(),
       questions:questions.map(parseChoiceQuestion),
       matrix_rows:matrixRows,
       response:row.response_id?{id:row.response_id,submitted_at:row.submitted_at}:null,
@@ -436,7 +437,7 @@ const getActivationAdminDetail=async({token,targetRole})=>{
        JOIN survey_isc1_assignments sia ON sia.id=sam.isc1_assignment_id AND sia.is_active=1
        LEFT JOIN survey_banks sb ON sb.id=COALESCE(sia.bank_id,sa.bank_id)
        LEFT JOIN cohorts co ON co.id=sia.cohort_id
-       WHERE sa.id=? AND sa.phase='ISC1' AND sa.target_role=?
+       WHERE sa.id=? AND sa.target_role=?
        GROUP BY sa.id,co.cohort_no,sb.title
        LIMIT 1`,
       [parsed.activationId,targetRole]
@@ -455,7 +456,7 @@ const getActivationAdminDetail=async({token,targetRole})=>{
        ORDER BY co.cohort_no,sim.name,sin.name,sia.id`,
       [parsed.activationId]
     );
-    return {...row,activation_id:row.id,id:token,survey_kind:'PHASE_MAPPING_BUNDLE',phase:'ISC1',questions:questions.map(parseChoiceQuestion),matrix_rows:matrixRows,ojc_category:null};
+    return {...row,activation_id:row.id,id:token,survey_kind:'PHASE_MAPPING_BUNDLE',phase:String(row.phase||'ISC1').toUpperCase(),questions:questions.map(parseChoiceQuestion),matrix_rows:matrixRows,ojc_category:null};
   }
 
   const[[row]]=await db.query(
@@ -1139,13 +1140,16 @@ exports.getAdminInstances=async(req,res,next)=>{
 
     const[activationRows]=target_role==='DOSEN'
       ? await db.query(
-          `SELECT CONCAT('act-',sa.id,'-map-',MIN(sia.id)) AS id,sa.title,sa.description,sa.target_role,sa.period_id,sa.is_active,sa.created_at,
+          `SELECT CONCAT('act-',sa.id,'-map-',MIN(sia.id)) AS id,
+                  CONCAT('Survei ISC1 - ',COALESCE(MIN(sb.title),sa.title)) AS title,
+                  sa.description,sa.target_role,sa.period_id,sa.is_active,sa.created_at,
                   COUNT(DISTINCT sbq.id) AS question_count,
                   COUNT(DISTINCT sar.id) AS response_count,
                   'activation' AS source_type
            FROM survey_activations sa
            JOIN survey_activation_mappings sam ON sam.activation_id=sa.id AND sam.isc1_assignment_id IS NOT NULL
            JOIN survey_isc1_assignments sia ON sia.id=sam.isc1_assignment_id AND sia.is_active=1
+           LEFT JOIN survey_banks sb ON sb.id=sia.bank_id
            LEFT JOIN survey_bank_questions sbq ON sbq.bank_id=sia.bank_id
            LEFT JOIN survey_activation_responses sar ON sar.activation_id=sa.id
            WHERE sa.period_id=? AND sa.target_role=? AND sa.phase='ISC1'
@@ -1156,11 +1160,14 @@ exports.getAdminInstances=async(req,res,next)=>{
       : [[]];
 
     const[ojcActivationRows]=await db.query(
-      `SELECT CONCAT('act-',sa.id,'-ojc') AS id,sa.title,sa.description,sa.target_role,sa.period_id,sa.is_active,sa.created_at,
+      `SELECT CONCAT('act-',sa.id,'-ojc') AS id,
+              CONCAT('Survei OJC - ',COALESCE(sb.title,sa.title)) AS title,
+              sa.description,sa.target_role,sa.period_id,sa.is_active,sa.created_at,
               COUNT(DISTINCT sbq.id) AS question_count,
               COUNT(DISTINCT sar.id) AS response_count,
               'activation' AS source_type
        FROM survey_activations sa
+       LEFT JOIN survey_banks sb ON sb.id=sa.bank_id
        LEFT JOIN survey_bank_questions sbq ON sbq.bank_id=sa.bank_id
        LEFT JOIN survey_activation_responses sar ON sar.activation_id=sa.id
        WHERE sa.period_id=? AND sa.target_role=? AND sa.phase='OJC'
