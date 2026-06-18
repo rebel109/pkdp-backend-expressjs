@@ -674,7 +674,7 @@ const buildEvalSurveyRecap=async({sessionId,survey})=>{
   };
 };
 
-const getAdminRecapData=async({period_id,target_role,survey_instance_id})=>{
+const resolveRecapData=async({period_id,target_role,survey_instance_id})=>{
   if(!period_id||!target_role||!survey_instance_id){
     const err=new Error('period_id, target_role, dan survey_instance_id wajib');
     err.statusCode=400;
@@ -849,6 +849,85 @@ const getAdminRecapData=async({period_id,target_role,survey_instance_id})=>{
   }
   const[questions]=await db.query('SELECT * FROM survey_instance_questions WHERE instance_id=? ORDER BY order_no,id',[survey.id]);
   return buildGeneralSurveyRecap({survey,questions:questions.map(parseChoiceQuestion)});
+};
+
+const getUserCohortMap=async({periodId,userIds})=>{
+  const map=new Map();
+  if(!userIds.length) return map;
+  const[rows]=await db.query(
+    `SELECT cm.user_id,c.cohort_id,co.cohort_no
+     FROM class_members cm
+     JOIN classes c ON c.id=cm.class_id
+     JOIN cohorts co ON co.id=c.cohort_id
+     WHERE c.period_id=? AND cm.user_id IN (?)
+     ORDER BY co.cohort_no`,
+    [periodId,userIds]
+  );
+  for(const row of rows){
+    if(!map.has(row.user_id)) map.set(row.user_id,{cohort_id:row.cohort_id,cohort_no:row.cohort_no});
+  }
+  return map;
+};
+
+const getCohortTargetCount=async({periodId,targetRole,cohortId})=>{
+  const[[row]]=await db.query(
+    `SELECT COUNT(DISTINCT cm.user_id) AS total
+     FROM class_members cm
+     JOIN classes c ON c.id=cm.class_id
+     JOIN users u ON u.id=cm.user_id
+     WHERE c.period_id=? AND c.cohort_id=? AND u.role=? AND u.status='active'`,
+    [periodId,cohortId,targetRole]
+  );
+  return Number(row?.total||0);
+};
+
+const recomputeAggregates=(aggregates,details)=>aggregates.map(agg=>{
+  const counts={};
+  const texts=[];
+  for(const detail of details){
+    const raw=detail?.answers?.[agg.question_id];
+    const items=Array.isArray(raw)?raw:(raw?[raw]:[]);
+    for(const item of items){
+      if(agg.question_type==='text'){
+        if(item?.answer_text&&String(item.answer_text).trim()) texts.push(item.answer_text);
+        continue;
+      }
+      const key=agg.question_type==='scale_1_4'?String(item?.answer_scale||''):String(item?.answer_choice||'').toLowerCase();
+      if(key) counts[key]=(counts[key]||0)+1;
+    }
+  }
+  return {...agg,counts,texts};
+});
+
+const getAdminRecapData=async(query)=>{
+  const data=await resolveRecapData(query);
+  const periodId=query.period_id;
+  const targetRole=query.target_role;
+  const cohortId=query.cohort_id?String(query.cohort_id):'';
+  const details=data.details||[];
+  const userIds=[...new Set(details.map(d=>d.user_id).filter(Boolean))];
+  const cohortMap=await getUserCohortMap({periodId,userIds});
+  const annotated=details.map(d=>{
+    const info=cohortMap.get(d.user_id);
+    return {...d,cohort_id:d.cohort_id??info?.cohort_id??null,cohort_no:d.cohort_no??info?.cohort_no??null};
+  });
+  if(!cohortId) return {...data,details:annotated};
+  const filtered=annotated.filter(d=>String(d.cohort_id||'')===cohortId);
+  const totalTarget=await getCohortTargetCount({periodId,targetRole,cohortId});
+  const respondedCount=filtered.length;
+  const aggregates=Array.isArray(data.aggregates)?recomputeAggregates(data.aggregates,filtered):data.aggregates;
+  return {
+    ...data,
+    aggregates,
+    summary:{
+      ...data.summary,
+      total_target:totalTarget,
+      responded_count:respondedCount,
+      not_responded_count:Math.max(totalTarget-respondedCount,0),
+      response_rate:totalTarget?Math.round((respondedCount/totalTarget)*100):0
+    },
+    details:filtered
+  };
 };
 
 const toCsvValue=value=>`"${String(value??'').replace(/"/g,'""')}"`;

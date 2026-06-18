@@ -1,5 +1,5 @@
 require('dotenv').config();
-const express=require('express'),cors=require('cors'),path=require('path');
+const express=require('express'),cors=require('cors'),path=require('path'),fs=require('fs');
 const { authenticate, ensureNotCertificateOnly } = require('./middlewares/auth');
 const { uploadImage, uploadAny, maxUploadSizeMb } = require('./middlewares/upload');
 const app=express();
@@ -14,6 +14,16 @@ app.use((req,res,next)=>{
 });
 app.use(express.json());app.use(express.urlencoded({extended:true}));
 app.use('/uploads',express.static(uploadDir));
+
+// Force download (attachment) for uploaded files — used by export PDF links
+app.get('/download/:file',(req,res)=>{
+  const fileName=path.basename(req.params.file);
+  const absolutePath=path.join(uploadDir,fileName);
+  if(!absolutePath.startsWith(uploadDir)||!fs.existsSync(absolutePath)){
+    return res.status(404).json({message:'File tidak ditemukan'});
+  }
+  res.download(absolutePath,fileName);
+});
 
 // Route upload untuk profile (gambar)
 app.post('/api/upload', authenticate, ensureNotCertificateOnly, uploadImage.single('file'), (req, res) => {
