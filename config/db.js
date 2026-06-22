@@ -1,6 +1,9 @@
 const mysql = require('mysql2/promise');
 require('dotenv').config();
-const dbTimeZone = process.env.DB_TIMEZONE || '+07:00';
+const dbTimeZone = String(process.env.DB_TIMEZONE || '+07:00').trim() || '+07:00';
+const appTimeZone = String(process.env.TZ || 'Asia/Jakarta').trim() || 'Asia/Jakarta';
+if(!process.env.TZ || !String(process.env.TZ).trim()) process.env.TZ = appTimeZone;
+if(!process.env.DB_TIMEZONE || !String(process.env.DB_TIMEZONE).trim()) process.env.DB_TIMEZONE = dbTimeZone;
 const pool = mysql.createPool({
   host: process.env.DB_HOST||'localhost',
   port: parseInt(process.env.DB_PORT)||3306,

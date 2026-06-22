@@ -1,4 +1,6 @@
 require('dotenv').config();
+if(!process.env.TZ||!String(process.env.TZ).trim()) process.env.TZ='Asia/Jakarta';
+if(!process.env.DB_TIMEZONE||!String(process.env.DB_TIMEZONE).trim()) process.env.DB_TIMEZONE='+07:00';
 const express=require('express'),cors=require('cors'),path=require('path'),fs=require('fs');
 const { authenticate, ensureNotCertificateOnly } = require('./middlewares/auth');
 const { uploadImage, uploadAny, maxUploadSizeMb } = require('./middlewares/upload');
