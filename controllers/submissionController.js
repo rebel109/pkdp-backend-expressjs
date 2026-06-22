@@ -440,13 +440,9 @@ exports.create = async (req, res, next) => {
     );
 
     if (exist) {
-      await db.query(
-        `UPDATE submissions
-         SET file_path = ?, link_url = ?, status = 'submitted', updated_at = NOW()
-         WHERE id = ?`,
-        [file_path, link_url || null, exist.id]
-      );
-      return res.json({ message: 'Tugas diperbarui', id: exist.id });
+      return res.status(409).json({
+        message: 'Tugas sudah pernah dikumpulkan. Gunakan fitur upload ulang dari detail submission.'
+      });
     }
 
     const [r] = await db.query(
@@ -748,12 +744,15 @@ exports.reupload = async (req, res, next) => {
     if (!sub) return res.status(404).json({ message: 'Pengumpulan tidak ditemukan' });
     if (sub.user_id !== req.user.id)
       return res.status(403).json({ message: 'Bukan pengumpulan Anda' });
-    const isRemedialLane = REMEDIAL_STATUSES.includes(sub.status);
-    if (isRemedialLane && (!sub.remedial_enabled || sub.status !== 'remedial_open')) {
-      return res.status(403).json({ message: 'Remedial belum dibuka atau sudah ditutup oleh admin' });
-    }
-    if (!isRemedialLane && sub.status !== 'revision') {
-      return res.status(403).json({ message: 'Upload ulang hanya tersedia saat revisi atau remedial dibuka' });
+    const isActiveRemedialUpload = sub.status === 'remedial_open' && !!sub.remedial_enabled;
+    const isNormalSelfReplaceAllowed = ['submitted', 'revision'].includes(sub.status);
+
+    if (REMEDIAL_STATUSES.includes(sub.status)) {
+      if (!isActiveRemedialUpload) {
+        return res.status(403).json({ message: 'Remedial belum dibuka atau sudah ditutup oleh admin' });
+      }
+    } else if (!isNormalSelfReplaceAllowed) {
+      return res.status(403).json({ message: 'Upload ulang hanya tersedia sebelum direview, saat revisi, atau saat remedial dibuka' });
     }
 
     const file_path = req.file ? req.file.filename : null;
@@ -761,6 +760,9 @@ exports.reupload = async (req, res, next) => {
 
     if (!file_path && !link_url)
       return res.status(400).json({ message: 'Upload file PDF atau masukkan link' });
+
+    const nextFilePath = file_path || null;
+    const nextLinkUrl = file_path ? null : (link_url || null);
 
     await ensureUploadHistoryTable();
     if (sub.file_path || sub.link_url) {
@@ -771,16 +773,16 @@ exports.reupload = async (req, res, next) => {
       );
     }
 
-    const nextStatus = isRemedialLane ? 'remedial_submitted' : 'submitted';
+    const nextStatus = isActiveRemedialUpload ? 'remedial_submitted' : 'submitted';
     await db.query(
       `UPDATE submissions
-       SET file_path = COALESCE(?, file_path),
-           link_url = COALESCE(?, link_url),
+       SET file_path = ?,
+           link_url = ?,
            status = ?,
            initial_final_score = COALESCE(initial_final_score, ?),
            updated_at = NOW()
        WHERE id = ?`,
-      [file_path, link_url || null, nextStatus, sub.final_score ?? null, req.params.id]
+      [nextFilePath, nextLinkUrl, nextStatus, sub.final_score ?? null, req.params.id]
     );
     res.json({ message: 'File berhasil diupload ulang' });
   } catch (e) { next(e); }
