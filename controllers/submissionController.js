@@ -100,7 +100,7 @@ exports.getAll = async (req, res, next) => {
                co.id AS cohort_id,
                co.cohort_no,
                COALESCE(c.name, 'Semua Kelas') AS class_name,
-               g.final_score, g.total_score,
+               g.final_score, g.total_score, g.is_draft,
                CASE
                  WHEN s.initial_final_score IS NOT NULL AND s.remedial_final_score IS NOT NULL THEN GREATEST(s.initial_final_score, s.remedial_final_score)
                  ELSE COALESCE(s.remedial_final_score, s.initial_final_score, g.final_score)
@@ -168,7 +168,7 @@ exports.getAll = async (req, res, next) => {
              co.id   AS cohort_id,
              co.cohort_no,
              COALESCE(c.name, 'Semua Kelas') AS class_name,
-             g.final_score, g.total_score,
+             g.final_score, g.total_score, g.is_draft,
              CASE
                WHEN s.initial_final_score IS NOT NULL AND s.remedial_final_score IS NOT NULL THEN GREATEST(s.initial_final_score, s.remedial_final_score)
                ELSE COALESCE(s.remedial_final_score, s.initial_final_score, g.final_score)

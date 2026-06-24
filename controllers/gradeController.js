@@ -293,6 +293,7 @@ exports.create=async(req,res,next)=>{
   try{
     const{submission_id,instrument_id,aspect_scores,notes}=req.body;
     if(!submission_id) return res.status(400).json({message:'submission_id wajib'});
+    const draftNotes=notes!=null?String(notes):'';
 
     const [[subMeta]]=await db.query(
       `SELECT s.status,s.remedial_enabled,s.initial_final_score,g.final_score AS existing_final_score,t.phase,t.period_id,t.class_id,t.id AS task_id,t.material_id,t.assessment_component
@@ -324,7 +325,8 @@ exports.create=async(req,res,next)=>{
       if(!assignment) return res.status(403).json({message:'Akses ditolak: bukan kelas Anda'});
     }
 
-    const requireNotes=['OJC','ISC2'].includes(subMeta.phase);
+    const isDraft=!!req.body.is_draft;
+    const requireNotes=!isDraft&&['OJC','ISC2'].includes(subMeta.phase);
     if(requireNotes&&!String(notes||'').trim()){
       return res.status(400).json({message:'Catatan nilai wajib diisi untuk OJC/ISC2'});
     }
@@ -334,25 +336,37 @@ exports.create=async(req,res,next)=>{
     if(requiresRemedialUpload&&subMeta.status!=='remedial_submitted'){
       return res.status(403).json({message:'Peserta harus upload tugas remedial terlebih dahulu sebelum narasumber bisa menilai'});
     }
+    if(req.user.role==='NARASUMBER'&&['approved','remedial_approved'].includes(subMeta.status)){
+      return res.status(403).json({message:'Nilai sudah final dan tidak bisa diubah. Hubungi Admin jika perlu membuka kunci.'});
+    }
 
     const total=( aspect_scores||[]).reduce((s,a)=>s+(parseInt(a.score)||0),0);
-    const aspectCount=aspect_scores?.length||0;
-    const maxAspectScore=aspectCount*3;
-    const final=maxAspectScore>0?Math.round((total/maxAspectScore)*100):0;
+    let maxAspectScore=0;
+    if(instrument_id){
+      const[[ins]]=await db.query(
+        "SELECT COUNT(*) AS cnt FROM instrument_aspects WHERE instrument_id=?",[instrument_id]
+      );
+      maxAspectScore=(ins?.cnt||0)*3;
+    }
+    const finalScore=maxAspectScore>0?Math.round((total/maxAspectScore)*100):0;
     const[[eg]]=await db.query('SELECT id FROM grades WHERE submission_id=?',[submission_id]);
     let gid;
-    if(eg){await db.query('UPDATE grades SET instrument_id=?,total_score=?,final_score=?,notes=?,narasumber_id=?,updated_at=NOW() WHERE id=?',[instrument_id||null,total,final,notes,req.user.id,eg.id]);gid=eg.id;await db.query('DELETE FROM grade_aspects WHERE grade_id=?',[gid]);}
-    else{const[r]=await db.query('INSERT INTO grades (submission_id,narasumber_id,instrument_id,total_score,final_score,notes) VALUES (?,?,?,?,?,?)',[submission_id,req.user.id,instrument_id||null,total,final,notes]);gid=r.insertId;}
+    if(eg){await db.query('UPDATE grades SET instrument_id=?,total_score=?,final_score=?,notes=?,is_draft=?,narasumber_id=?,updated_at=NOW() WHERE id=?',[instrument_id||null,total,finalScore,notes,isDraft?1:0,req.user.id,eg.id]);gid=eg.id;await db.query('DELETE FROM grade_aspects WHERE grade_id=?',[gid]);}
+    else{const[r]=await db.query('INSERT INTO grades (submission_id,narasumber_id,instrument_id,total_score,final_score,notes,is_draft) VALUES (?,?,?,?,?,?,?)',[submission_id,req.user.id,instrument_id||null,total,finalScore,notes,isDraft?1:0]);gid=r.insertId;}
     if(aspect_scores?.length){for(const a of aspect_scores){await db.query('INSERT INTO grade_aspects (grade_id,aspect_id,score,note) VALUES (?,?,?,?)',[gid,a.aspect_id,a.score,a.note||null]);}}
     if(isRemedialLane&&subMeta.remedial_enabled){
-      await db.query(
-        "UPDATE submissions SET status='remedial_reviewed', initial_final_score=COALESCE(initial_final_score,?), remedial_final_score=? WHERE id=?",
-        [subMeta.existing_final_score??final,final,submission_id]
-      );
+      if(isDraft){
+        await db.query("UPDATE submissions SET status='remedial_reviewed' WHERE id=?",[submission_id]);
+      }else{
+        await db.query(
+          "UPDATE submissions SET status='remedial_reviewed', initial_final_score=COALESCE(initial_final_score,?), remedial_final_score=? WHERE id=?",
+          [subMeta.existing_final_score??finalScore,finalScore,submission_id]
+        );
+      }
     }else{
       await db.query("UPDATE submissions SET status='reviewed' WHERE id=?",[submission_id]);
     }
-    res.json({message:'Nilai disimpan',grade_id:gid,total_score:total,final_score:final});
+    res.json({message:'Nilai disimpan',grade_id:gid,total_score:total,final_score:finalScore});
   }catch(e){next(e);}
 };
 exports.update=async(req,res,next)=>{
@@ -383,6 +397,9 @@ exports.update=async(req,res,next)=>{
     if(requiresRemedialUpload&&gradeMeta?.status!=='remedial_submitted'){
       return res.status(403).json({message:'Peserta harus upload tugas remedial terlebih dahulu sebelum narasumber bisa menilai'});
     }
+    if(req.user.role==='NARASUMBER'&&['approved','remedial_approved'].includes(gradeMeta?.status)){
+      return res.status(403).json({message:'Nilai sudah final dan tidak bisa diubah. Hubungi Admin jika perlu membuka kunci.'});
+    }
 
     // Narasumber cannot update locked grades
     if(req.user.role==='NARASUMBER'&&grade.is_locked){
@@ -390,8 +407,13 @@ exports.update=async(req,res,next)=>{
     }
 
     const total=(aspect_scores||[]).reduce((s,a)=>s+(parseInt(a.score)||0),0);
-    const aspectCount=aspect_scores?.length||0;
-    const maxAspectScore=aspectCount*3;
+    let maxAspectScore=0;
+    if(grade.instrument_id){
+      const[[ins]]=await db.query(
+        "SELECT COUNT(*) AS cnt FROM instrument_aspects WHERE instrument_id=?",[grade.instrument_id]
+      );
+      maxAspectScore=(ins?.cnt||0)*3;
+    }
     const final=maxAspectScore>0?Math.round((total/maxAspectScore)*100):0;
     await db.query('UPDATE grades SET total_score=?,final_score=?,notes=?,updated_at=NOW() WHERE id=?',[total,final,notes,req.params.id]);
     await db.query('DELETE FROM grade_aspects WHERE grade_id=?',[req.params.id]);
@@ -591,7 +613,7 @@ exports.narasumberSummary=async(req,res,next)=>{
       const uph=userIds.map(()=>'?').join(',');
       const[sRows]=await db.query(
         `SELECT s.user_id,s.task_id,s.status AS submission_status,s.submitted_at,
-                g.narasumber_id,g.final_score,g.total_score,g.updated_at AS graded_at
+                g.narasumber_id,g.final_score,g.total_score,g.is_draft,g.updated_at AS graded_at
          FROM submissions s
          LEFT JOIN grades g ON g.submission_id=s.id
          WHERE s.task_id IN (${tph}) AND s.user_id IN (${uph})`,
@@ -649,8 +671,9 @@ exports.narasumberSummary=async(req,res,next)=>{
         const participants=classMembers.map(m=>{
           const materials=cls.tasks.map(t=>{
             const st=statusMap.get(`${m.user_id}-${t.id}`);
-            const isGraded=st?.final_score!==null&&st?.final_score!==undefined;
-            const status=isGraded?'graded':(st?.submission_status||'not_submitted');
+            const isDraft=!!st?.is_draft;
+            const isGraded=st?.final_score!==null&&st?.final_score!==undefined&&!isDraft;
+            const status=isDraft?'draft':(isGraded?'graded':(st?.submission_status||'not_submitted'));
             totalTasks++;
             if(['submitted','reviewed','approved'].includes(st?.submission_status)) totalRead++;
             if(st?.submission_status==='revision') totalRevision++;
@@ -666,6 +689,7 @@ exports.narasumberSummary=async(req,res,next)=>{
               submitted_at:st?.submitted_at||null,
               final_score:st?.final_score??null,
               total_score:st?.total_score??null,
+              is_draft:isDraft,
               graded_at:st?.graded_at||null
             };
           });

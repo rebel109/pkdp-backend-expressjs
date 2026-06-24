@@ -69,5 +69,24 @@ app.get('/api/health',(_,res)=>res.json({status:'ok',time:new Date()}));
 app.use((_,res)=>res.status(404).json({message:'Route tidak ditemukan'}));
 app.use(require('./middlewares/errorHandler'));
 const PORT=process.env.PORT||5000;
+
+// --- Auto-migrate on server start ---
+const mysql = require('mysql2/promise');
+const { runMigrations } = require('./utils/runMigrations');
+(async () => {
+  try {
+    const db = await mysql.createConnection({
+      host: process.env.DB_HOST,
+      user: process.env.DB_USER,
+      password: process.env.DB_PASSWORD,
+      database: process.env.DB_NAME
+    });
+    await runMigrations(db);
+    await db.end();
+  } catch (e) {
+    console.log('[migration] warning: could not run auto-migrate —', e.message);
+  }
+})();
+
 app.listen(PORT,()=>console.log(`🚀  PKDP API http://localhost:${PORT}`));
 module.exports=app;
