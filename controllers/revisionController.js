@@ -1,19 +1,37 @@
 const db = require('../config/db');
 
+const ensureAttachmentColumns = async () => {
+  const columns = [
+    "ADD COLUMN IF NOT EXISTS attachment_url VARCHAR(255) NULL AFTER message",
+    "ADD COLUMN IF NOT EXISTS attachment_name VARCHAR(255) NULL AFTER attachment_url",
+    "ADD COLUMN IF NOT EXISTS attachment_type VARCHAR(100) NULL AFTER attachment_name",
+    "ADD COLUMN IF NOT EXISTS attachment_size INT NULL AFTER attachment_type"
+  ];
+
+  for (const clause of columns) {
+    await db.query(`ALTER TABLE revision_threads ${clause}`);
+  }
+};
+
 // Auto-create tabel jika belum ada
 const ensureTable = async () => {
   await db.query(`
     CREATE TABLE IF NOT EXISTS revision_threads (
-      id            INT AUTO_INCREMENT PRIMARY KEY,
-      submission_id INT NOT NULL,
-      user_id       INT NOT NULL,
-      role          ENUM('DOSEN','NARASUMBER','ADMIN') NOT NULL,
-      message       TEXT NOT NULL,
-      created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      id              INT AUTO_INCREMENT PRIMARY KEY,
+      submission_id   INT NOT NULL,
+      user_id         INT NOT NULL,
+      role            ENUM('DOSEN','NARASUMBER','ADMIN') NOT NULL,
+      message         TEXT NULL,
+      attachment_url  VARCHAR(255) NULL,
+      attachment_name VARCHAR(255) NULL,
+      attachment_type VARCHAR(100) NULL,
+      attachment_size INT NULL,
+      created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (submission_id) REFERENCES submissions(id) ON DELETE CASCADE,
       FOREIGN KEY (user_id)       REFERENCES users(id) ON DELETE CASCADE
     )
   `);
+  await ensureAttachmentColumns();
 };
 
 // GET /api/revisions?submission_id=
@@ -35,6 +53,10 @@ exports.getAll = async (req, res, next) => {
       SELECT r.id, r.submission_id,
              r.created_by AS user_id,
              r.comment    AS message,
+             NULL         AS attachment_url,
+             NULL         AS attachment_name,
+             NULL         AS attachment_type,
+             NULL         AS attachment_size,
              'NARASUMBER' AS role,
              r.created_at,
              u.name       AS sender_name,
@@ -44,7 +66,17 @@ exports.getAll = async (req, res, next) => {
       WHERE r.submission_id = ?
       ORDER BY r.created_at ASC`, [submission_id]);
 
-    const all = [...old, ...threads]
+    const normalizedThreads = threads.map(thread => ({
+      ...thread,
+      attachment_size: thread.attachment_size == null ? null : Number(thread.attachment_size)
+    }));
+
+    const normalizedOld = old.map(thread => ({
+      ...thread,
+      attachment_size: null
+    }));
+
+    const all = [...normalizedOld, ...normalizedThreads]
       .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
 
     res.json(all);
@@ -55,9 +87,28 @@ exports.getAll = async (req, res, next) => {
 exports.create = async (req, res, next) => {
   try {
     await ensureTable();
-    const { submission_id, message } = req.body;
-    if (!submission_id || !message?.trim())
-      return res.status(400).json({ message: 'submission_id dan message wajib' });
+    const {
+      submission_id,
+      message,
+      attachment_url,
+      attachment_name,
+      attachment_type,
+      attachment_size
+    } = req.body;
+    const trimmedMessage = message?.trim() || '';
+    const normalizedAttachmentUrl = attachment_url?.trim() || '';
+    const normalizedAttachmentName = attachment_name?.trim() || '';
+    const normalizedAttachmentType = attachment_type?.trim() || '';
+    const normalizedAttachmentSize = attachment_size == null || attachment_size === ''
+      ? null
+      : Number(attachment_size);
+
+    if (!submission_id || (!trimmedMessage && !normalizedAttachmentUrl))
+      return res.status(400).json({ message: 'submission_id dan minimal message atau lampiran wajib diisi' });
+
+    if (normalizedAttachmentSize != null && (!Number.isFinite(normalizedAttachmentSize) || normalizedAttachmentSize < 0)) {
+      return res.status(400).json({ message: 'Ukuran lampiran tidak valid' });
+    }
 
     const [[sub]] = await db.query(
       'SELECT user_id, task_id, status FROM submissions WHERE id = ?', [submission_id]
@@ -69,8 +120,20 @@ exports.create = async (req, res, next) => {
       return res.status(403).json({ message: 'Akses ditolak' });
 
     const [r] = await db.query(
-      'INSERT INTO revision_threads (submission_id, user_id, role, message) VALUES (?,?,?,?)',
-      [submission_id, req.user.id, req.user.role, message.trim()]
+      `INSERT INTO revision_threads (
+        submission_id, user_id, role, message,
+        attachment_url, attachment_name, attachment_type, attachment_size
+      ) VALUES (?,?,?,?,?,?,?,?)`,
+      [
+        submission_id,
+        req.user.id,
+        req.user.role,
+        trimmedMessage || null,
+        normalizedAttachmentUrl || null,
+        normalizedAttachmentName || null,
+        normalizedAttachmentType || null,
+        normalizedAttachmentSize
+      ]
     );
 
     const isRemedialStatus = ['remedial_open','remedial_submitted','remedial_reviewed','remedial_approved'].includes(sub.status);
