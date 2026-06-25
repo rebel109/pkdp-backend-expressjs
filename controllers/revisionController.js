@@ -1,16 +1,33 @@
 const db = require('../config/db');
 
-const ensureAttachmentColumns = async () => {
-  const columns = [
-    "ADD COLUMN IF NOT EXISTS attachment_url VARCHAR(255) NULL AFTER message",
-    "ADD COLUMN IF NOT EXISTS attachment_name VARCHAR(255) NULL AFTER attachment_url",
-    "ADD COLUMN IF NOT EXISTS attachment_type VARCHAR(100) NULL AFTER attachment_name",
-    "ADD COLUMN IF NOT EXISTS attachment_size INT NULL AFTER attachment_type"
-  ];
+let attachmentColumnsEnsured = false;
 
-  for (const clause of columns) {
-    await db.query(`ALTER TABLE revision_threads ${clause}`);
+const ensureAttachmentColumns = async () => {
+  if (attachmentColumnsEnsured) return;
+
+  const [cols] = await db.query(`
+    SHOW COLUMNS FROM revision_threads
+    WHERE Field IN ('message','attachment_url','attachment_name','attachment_type','attachment_size')
+  `);
+  const existing = new Map(cols.map(c => [c.Field, c]));
+
+  if (existing.get('message')?.Null !== 'YES') {
+    await db.query(`ALTER TABLE revision_threads MODIFY COLUMN message TEXT NULL`);
   }
+  if (!existing.has('attachment_url')) {
+    await db.query(`ALTER TABLE revision_threads ADD COLUMN attachment_url VARCHAR(255) NULL AFTER message`);
+  }
+  if (!existing.has('attachment_name')) {
+    await db.query(`ALTER TABLE revision_threads ADD COLUMN attachment_name VARCHAR(255) NULL AFTER attachment_url`);
+  }
+  if (!existing.has('attachment_type')) {
+    await db.query(`ALTER TABLE revision_threads ADD COLUMN attachment_type VARCHAR(100) NULL AFTER attachment_name`);
+  }
+  if (!existing.has('attachment_size')) {
+    await db.query(`ALTER TABLE revision_threads ADD COLUMN attachment_size INT NULL AFTER attachment_type`);
+  }
+
+  attachmentColumnsEnsured = true;
 };
 
 // Auto-create tabel jika belum ada
