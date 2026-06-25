@@ -55,17 +55,49 @@ exports.getStats=async(req,res,next)=>{
          FROM submissions s
          JOIN tasks t ON t.id=s.task_id
          WHERE t.period_id=?
-           AND t.class_id IN (SELECT cn.class_id FROM class_narasumber cn WHERE cn.narasumber_id=?)
-           AND s.status='submitted'`,
-        [pid,req.user.id]
+           AND EXISTS (
+             SELECT 1 FROM class_narasumber cn
+             WHERE cn.narasumber_id=?
+               AND cn.class_id=t.class_id
+               AND (
+                 cn.material_id IS NULL
+                 OR cn.material_id=t.id
+                 OR (t.material_id IS NOT NULL AND cn.material_id=t.material_id)
+                 OR cn.material_id IN (
+                   SELECT tx.id FROM tasks tx
+                   WHERE tx.class_id=t.class_id
+                     AND tx.phase=t.phase
+                     AND tx.assessment_component=t.assessment_component
+                 )
+               )
+           )
+           AND s.status='submitted'
+           AND s.id NOT IN (SELECT g.submission_id FROM grades g WHERE g.narasumber_id=?)`,
+        [pid,req.user.id,req.user.id]
       );
       const[[{graded}]]=await db.query(
         `SELECT COUNT(*) AS graded
          FROM grades g
          JOIN submissions s ON s.id=g.submission_id
          JOIN tasks t ON t.id=s.task_id
-         WHERE g.narasumber_id=? AND t.period_id=?`,
-        [req.user.id,pid]
+         WHERE g.narasumber_id=? AND t.period_id=?
+           AND EXISTS (
+             SELECT 1 FROM class_narasumber cn
+             WHERE cn.narasumber_id=?
+               AND cn.class_id=t.class_id
+               AND (
+                 cn.material_id IS NULL
+                 OR cn.material_id=t.id
+                 OR (t.material_id IS NOT NULL AND cn.material_id=t.material_id)
+                 OR cn.material_id IN (
+                   SELECT tx.id FROM tasks tx
+                   WHERE tx.class_id=t.class_id
+                     AND tx.phase=t.phase
+                     AND tx.assessment_component=t.assessment_component
+                 )
+               )
+           )`,
+        [req.user.id,pid,req.user.id]
       );
       return res.json({classes,pending_reviews:pending,total_graded:graded});
     }
