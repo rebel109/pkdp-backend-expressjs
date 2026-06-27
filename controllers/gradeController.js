@@ -7,6 +7,24 @@ const ensureGradeTimelineSchema=async()=>{
   if(!existing.has('remedial_graded_at')) await db.query('ALTER TABLE grades ADD COLUMN remedial_graded_at DATETIME NULL AFTER initial_graded_at');
 };
 
+const ensureGradeUnlockAuditTable=async()=>{
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS grade_unlock_audit (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      grade_id INT NOT NULL,
+      submission_id INT NULL,
+      admin_user_id INT NOT NULL,
+      previous_submission_status VARCHAR(30) NULL,
+      current_submission_status VARCHAR(30) NULL,
+      status_changed TINYINT(1) NOT NULL DEFAULT 0,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (grade_id) REFERENCES grades(id) ON DELETE CASCADE,
+      FOREIGN KEY (submission_id) REFERENCES submissions(id) ON DELETE SET NULL,
+      FOREIGN KEY (admin_user_id) REFERENCES users(id) ON DELETE CASCADE
+    )
+  `);
+};
+
 const OJC_WEIGHTS={
   OJC_RPS_INSTRUMEN:30,
   OJC_VIDEO_PEMBELAJARAN_PRAKTIK:30,
@@ -463,10 +481,95 @@ exports.lock=async(req,res,next)=>{
 };
 exports.unlock=async(req,res,next)=>{
   try{
-    const[[grade]]=await db.query('SELECT id FROM grades WHERE id=?',[req.params.id]);
+    await ensureGradeUnlockAuditTable();
+
+    const[[grade]]=await db.query(`
+      SELECT g.id,g.submission_id,s.status AS submission_status
+      FROM grades g
+      LEFT JOIN submissions s ON s.id=g.submission_id
+      WHERE g.id=?
+    `,[req.params.id]);
     if(!grade) return res.status(404).json({message:'Nilai tidak ditemukan'});
+
+    const previousStatus=grade.submission_status||null;
+
     await db.query('UPDATE grades SET is_locked=0,updated_at=NOW() WHERE id=?',[req.params.id]);
-    res.json({message:'Nilai dibuka'});
+
+    const statusDowngradeMap={
+      approved:'reviewed',
+      remedial_approved:'remedial_reviewed'
+    };
+    const nextStatus=statusDowngradeMap[grade.submission_status]||grade.submission_status||null;
+    const statusChanged=Boolean(grade.submission_id&&previousStatus&&nextStatus&&nextStatus!==previousStatus);
+
+    if(statusChanged){
+      await db.query('UPDATE submissions SET status=?,updated_at=NOW() WHERE id=?',[nextStatus,grade.submission_id]);
+    }
+
+    await db.query(
+      `INSERT INTO grade_unlock_audit (grade_id,submission_id,admin_user_id,previous_submission_status,current_submission_status,status_changed)
+       VALUES (?,?,?,?,?,?)`,
+      [req.params.id,grade.submission_id||null,req.user.id,previousStatus,nextStatus,statusChanged?1:0]
+    );
+
+    const message=statusChanged
+      ? `Nilai dibuka dan status submission dikembalikan ke ${nextStatus}`
+      : 'Nilai dibuka';
+
+    res.json({
+      message,
+      status_changed:statusChanged,
+      previous_status:previousStatus,
+      current_status:nextStatus
+    });
+  }catch(e){next(e);}
+};
+exports.getUnlockAudit=async(req,res,next)=>{
+  try{
+    await ensureGradeUnlockAuditTable();
+    const gradeId=parseInt(req.params.id,10);
+    if(!gradeId) return res.status(400).json({message:'ID nilai tidak valid'});
+
+    const[rows]=await db.query(
+      `SELECT a.id,a.grade_id,a.submission_id,a.previous_submission_status,a.current_submission_status,
+              a.status_changed,a.created_at,u.id AS admin_user_id,u.name AS admin_name
+       FROM grade_unlock_audit a
+       LEFT JOIN users u ON u.id=a.admin_user_id
+       WHERE a.grade_id=?
+       ORDER BY a.created_at DESC,a.id DESC`,
+      [gradeId]
+    );
+    res.json(rows);
+  }catch(e){next(e);}
+};
+exports.getAllUnlockAudit=async(req,res,next)=>{
+  try{
+    await ensureGradeUnlockAuditTable();
+    const{search='',phase='',period_id=''}=req.query;
+    let q=`SELECT a.id,a.grade_id,a.submission_id,a.previous_submission_status,a.current_submission_status,
+                  a.status_changed,a.created_at,u.name AS admin_name,
+                  dosen.name AS dosen_name,ns.name AS narasumber_name,
+                  t.title AS task_title,t.phase,c.name AS class_name
+           FROM grade_unlock_audit a
+           LEFT JOIN users u ON u.id=a.admin_user_id
+           LEFT JOIN submissions s ON s.id=a.submission_id
+           LEFT JOIN grades g ON g.id=a.grade_id
+           LEFT JOIN users dosen ON dosen.id=s.user_id
+           LEFT JOIN users ns ON ns.id=g.narasumber_id
+           LEFT JOIN tasks t ON t.id=s.task_id
+           LEFT JOIN classes c ON c.id=t.class_id
+           WHERE 1=1`;
+    const params=[];
+    if(phase){q+=' AND t.phase=?';params.push(phase);}
+    if(period_id){q+=' AND t.period_id=?';params.push(period_id);}
+    if(search&&String(search).trim()){
+      q+=' AND (dosen.name LIKE ? OR ns.name LIKE ? OR u.name LIKE ? OR t.title LIKE ? OR c.name LIKE ?)';
+      const keyword=`%${String(search).trim()}%`;
+      params.push(keyword,keyword,keyword,keyword,keyword);
+    }
+    q+=' ORDER BY a.created_at DESC,a.id DESC';
+    const[rows]=await db.query(q,params);
+    res.json(rows);
   }catch(e){next(e);}
 };
 exports.remove=async(req,res,next)=>{try{await db.query('DELETE FROM grades WHERE id=?',[req.params.id]);res.json({message:'Nilai dihapus'});}catch(e){next(e);}};
@@ -644,7 +747,7 @@ exports.narasumberSummary=async(req,res,next)=>{
       const uph=userIds.map(()=>'?').join(',');
       const[sRows]=await db.query(
         `SELECT s.user_id,s.task_id,s.status AS submission_status,s.submitted_at,
-                g.narasumber_id,g.final_score,g.total_score,g.is_draft,g.updated_at AS graded_at
+                g.narasumber_id,g.final_score,g.total_score,g.is_draft,g.is_locked,g.updated_at AS graded_at
          FROM submissions s
          LEFT JOIN grades g ON g.submission_id=s.id
          WHERE s.task_id IN (${tph}) AND s.user_id IN (${uph})`,

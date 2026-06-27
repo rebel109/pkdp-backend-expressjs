@@ -706,7 +706,12 @@ exports.updateStatus = async (req, res, next) => {
       return res.status(403).json({ message: 'Status remedial tidak valid karena remedial belum dibuka.' });
     }
 
-    await db.query('UPDATE submissions SET status = ? WHERE id = ?', [status, req.params.id]);
+    await db.query('UPDATE submissions SET status = ?, updated_at = NOW() WHERE id = ?', [status, req.params.id]);
+
+    if (['approved', 'remedial_approved'].includes(status)) {
+      await db.query('UPDATE grades SET is_locked = 1, updated_at = NOW() WHERE submission_id = ?', [req.params.id]);
+    }
+
     res.json({ message: 'Status diperbarui', status });
   } catch (e) { next(e); }
 };
