@@ -12,6 +12,18 @@ const REMEDIAL_PASSING_SCORE = 60;
 const REMEDIAL_STATUSES = ['remedial_open','remedial_submitted','remedial_reviewed','remedial_approved'];
 const ALL_STATUSES = ['submitted','reviewed','revision','approved',...REMEDIAL_STATUSES];
 
+const ensureGradeTimelineSchema = async () => {
+  const [cols] = await db.query(`SHOW COLUMNS FROM grades WHERE Field IN ('initial_graded_at','remedial_graded_at')`);
+  const existing = new Set(cols.map(c => c.Field));
+  if (!existing.has('initial_graded_at')) await db.query(`ALTER TABLE grades ADD COLUMN initial_graded_at DATETIME NULL AFTER is_draft`);
+  if (!existing.has('remedial_graded_at')) await db.query(`ALTER TABLE grades ADD COLUMN remedial_graded_at DATETIME NULL AFTER initial_graded_at`);
+  await db.query(`
+    UPDATE grades
+    SET initial_graded_at = COALESCE(initial_graded_at, updated_at)
+    WHERE is_draft = 0 AND initial_graded_at IS NULL
+  `);
+};
+
 // Auto-create tabel revision_threads jika belum ada
 const ensureThreadsTable = async () => {
   await db.query(`
@@ -80,6 +92,7 @@ const ensureRemedialSchema = async () => {
 exports.getAll = async (req, res, next) => {
   try {
     await ensureRemedialSchema();
+    await ensureGradeTimelineSchema();
     const { task_id, status, phase, class_id } = req.query;
 
     if (req.user.role === 'NARASUMBER') {
@@ -102,8 +115,17 @@ exports.getAll = async (req, res, next) => {
                COALESCE(c.name, 'Semua Kelas') AS class_name,
                g.final_score, g.total_score, g.is_draft,
                CASE
-                 WHEN s.initial_final_score IS NOT NULL AND s.remedial_final_score IS NOT NULL THEN GREATEST(s.initial_final_score, s.remedial_final_score)
-                 ELSE COALESCE(s.remedial_final_score, s.initial_final_score, g.final_score)
+                 WHEN (
+                   COALESCE(s.remedial_enabled, 0) = 1
+                   OR COALESCE(s.remedial_attempt_no, 0) > 0
+                   OR s.remedial_final_score IS NOT NULL
+                   OR s.status IN ('remedial_open','remedial_submitted','remedial_reviewed','remedial_approved')
+                 ) THEN
+                   CASE
+                     WHEN s.initial_final_score IS NOT NULL AND s.remedial_final_score IS NOT NULL THEN GREATEST(s.initial_final_score, s.remedial_final_score)
+                     ELSE COALESCE(s.remedial_final_score, s.initial_final_score, g.final_score)
+                   END
+                 ELSE g.final_score
                END AS effective_final_score
         FROM tasks t
         JOIN classes c ON c.id = t.class_id
@@ -170,8 +192,17 @@ exports.getAll = async (req, res, next) => {
              COALESCE(c.name, 'Semua Kelas') AS class_name,
              g.final_score, g.total_score, g.is_draft,
              CASE
-               WHEN s.initial_final_score IS NOT NULL AND s.remedial_final_score IS NOT NULL THEN GREATEST(s.initial_final_score, s.remedial_final_score)
-               ELSE COALESCE(s.remedial_final_score, s.initial_final_score, g.final_score)
+               WHEN (
+                 COALESCE(s.remedial_enabled, 0) = 1
+                 OR COALESCE(s.remedial_attempt_no, 0) > 0
+                 OR s.remedial_final_score IS NOT NULL
+                 OR s.status IN ('remedial_open','remedial_submitted','remedial_reviewed','remedial_approved')
+               ) THEN
+                 CASE
+                   WHEN s.initial_final_score IS NOT NULL AND s.remedial_final_score IS NOT NULL THEN GREATEST(s.initial_final_score, s.remedial_final_score)
+                   ELSE COALESCE(s.remedial_final_score, s.initial_final_score, g.final_score)
+                 END
+               ELSE g.final_score
              END AS effective_final_score
       FROM submissions s
       JOIN  users   u ON u.id  = s.user_id
@@ -221,6 +252,7 @@ exports.getOne = async (req, res, next) => {
     await ensureThreadsTable();
     await ensureUploadHistoryTable();
     await ensureRemedialSchema();
+    await ensureGradeTimelineSchema();
 
     const [[sub]] = await db.query(`
       SELECT s.*,
@@ -377,9 +409,20 @@ exports.getOne = async (req, res, next) => {
       WHERE submission_id = ?
       ORDER BY attempt_no ASC`, [req.params.id]);
 
-    const effective_final_score = sub.initial_final_score != null && sub.remedial_final_score != null
-      ? Math.max(Number(sub.initial_final_score), Number(sub.remedial_final_score))
-      : (sub.remedial_final_score ?? sub.initial_final_score ?? grade?.final_score ?? null);
+    const hasRemedialHistory = Boolean(
+      sub.remedial_enabled
+      || Number(sub.remedial_attempt_no || 0) > 0
+      || sub.remedial_final_score != null
+      || ['remedial_open','remedial_submitted','remedial_reviewed','remedial_approved'].includes(sub.status)
+    );
+
+    const effective_final_score = hasRemedialHistory
+      ? (
+          sub.initial_final_score != null && sub.remedial_final_score != null
+            ? Math.max(Number(sub.initial_final_score), Number(sub.remedial_final_score))
+            : (sub.remedial_final_score ?? sub.initial_final_score ?? grade?.final_score ?? null)
+        )
+      : (grade?.final_score ?? null);
 
     res.json({
       ...sub,

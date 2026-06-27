@@ -1,5 +1,12 @@
 const db=require('../config/db');
 
+const ensureGradeTimelineSchema=async()=>{
+  const [cols]=await db.query("SHOW COLUMNS FROM grades WHERE Field IN ('initial_graded_at','remedial_graded_at')");
+  const existing=new Set(cols.map(c=>c.Field));
+  if(!existing.has('initial_graded_at')) await db.query('ALTER TABLE grades ADD COLUMN initial_graded_at DATETIME NULL AFTER is_draft');
+  if(!existing.has('remedial_graded_at')) await db.query('ALTER TABLE grades ADD COLUMN remedial_graded_at DATETIME NULL AFTER initial_graded_at');
+};
+
 const OJC_WEIGHTS={
   OJC_RPS_INSTRUMEN:30,
   OJC_VIDEO_PEMBELAJARAN_PRAKTIK:30,
@@ -291,6 +298,7 @@ exports.summary=async(req,res,next)=>{
 };
 exports.create=async(req,res,next)=>{
   try{
+    await ensureGradeTimelineSchema();
     const{submission_id,instrument_id,aspect_scores,notes}=req.body;
     if(!submission_id) return res.status(400).json({message:'submission_id wajib'});
     const draftNotes=notes!=null?String(notes):'';
@@ -349,10 +357,33 @@ exports.create=async(req,res,next)=>{
       maxAspectScore=(ins?.cnt||0)*3;
     }
     const finalScore=maxAspectScore>0?Math.round((total/maxAspectScore)*100):0;
-    const[[eg]]=await db.query('SELECT id FROM grades WHERE submission_id=?',[submission_id]);
+    const[[eg]]=await db.query('SELECT id,initial_graded_at,remedial_graded_at FROM grades WHERE submission_id=?',[submission_id]);
+    const isFinalSubmission=!isDraft;
+    const isRemedialFinalSubmission=isFinalSubmission&&isRemedialLane;
+    const shouldSetInitialGradedAt=isFinalSubmission&&!isRemedialLane;
+    const shouldSetRemedialGradedAt=isRemedialFinalSubmission;
     let gid;
-    if(eg){await db.query('UPDATE grades SET instrument_id=?,total_score=?,final_score=?,notes=?,is_draft=?,narasumber_id=?,updated_at=NOW() WHERE id=?',[instrument_id||null,total,finalScore,notes,isDraft?1:0,req.user.id,eg.id]);gid=eg.id;await db.query('DELETE FROM grade_aspects WHERE grade_id=?',[gid]);}
-    else{const[r]=await db.query('INSERT INTO grades (submission_id,narasumber_id,instrument_id,total_score,final_score,notes,is_draft) VALUES (?,?,?,?,?,?,?)',[submission_id,req.user.id,instrument_id||null,total,finalScore,notes,isDraft?1:0]);gid=r.insertId;}
+    if(eg){await db.query(`UPDATE grades
+      SET instrument_id=?,
+          total_score=?,
+          final_score=?,
+          notes=?,
+          is_draft=?,
+          narasumber_id=?,
+          initial_graded_at=CASE WHEN ? THEN COALESCE(initial_graded_at,NOW()) ELSE initial_graded_at END,
+          remedial_graded_at=CASE WHEN ? THEN NOW() ELSE remedial_graded_at END,
+          updated_at=NOW()
+      WHERE id=?`,[instrument_id||null,total,finalScore,notes,isDraft?1:0,req.user.id,shouldSetInitialGradedAt?1:0,shouldSetRemedialGradedAt?1:0,eg.id]);gid=eg.id;await db.query('DELETE FROM grade_aspects WHERE grade_id=?',[gid]);}
+    else{const[r]=await db.query(`INSERT INTO grades (submission_id,narasumber_id,instrument_id,total_score,final_score,notes,is_draft,initial_graded_at,remedial_graded_at)
+      VALUES (?,?,?,?,?,?,?,?,?)`,[submission_id,req.user.id,instrument_id||null,total,finalScore,notes,isDraft?1:0,shouldSetInitialGradedAt?new Date():null,shouldSetRemedialGradedAt?new Date():null]);gid=r.insertId;}
+    await db.query(`UPDATE grades
+      SET initial_graded_at=COALESCE(initial_graded_at,updated_at)
+      WHERE id=? AND is_draft=0 AND initial_graded_at IS NULL`,[gid]);
+    if(isRemedialFinalSubmission){
+      await db.query(`UPDATE grades
+        SET remedial_graded_at=COALESCE(remedial_graded_at,updated_at)
+        WHERE id=?`,[gid]);
+    }
     if(aspect_scores?.length){for(const a of aspect_scores){await db.query('INSERT INTO grade_aspects (grade_id,aspect_id,score,note) VALUES (?,?,?,?)',[gid,a.aspect_id,a.score,a.note||null]);}}
     if(isRemedialLane&&subMeta.remedial_enabled){
       if(isDraft){
