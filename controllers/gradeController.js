@@ -161,6 +161,19 @@ const requiredComponentsCount=weightMap=>Object.keys(weightMap).length;
 
 const phaseOrder=['ISC1','OJC','ISC2'];
 const ACTIVE_SUBMISSION_STATUSES=['submitted','reviewed','revision','approved'];
+const PARTICIPANT_VISIBLE_GRADE_STATUSES=['approved','remedial_approved'];
+
+const isParticipantGradeVisible=row=>PARTICIPANT_VISIBLE_GRADE_STATUSES.includes(row?.status)&&!Number(row?.is_draft||0);
+
+const sanitizeParticipantGradeRow=row=>isParticipantGradeVisible(row)
+  ? row
+  : {
+      ...row,
+      total_score:null,
+      final_score:null,
+      notes:null,
+      instrument_title:null
+    };
 
 const buildParticipantRecapData=async({period_id,phase,class_id})=>{
   let participantQ=`SELECT u.id AS user_id,u.name,u.email,pr.nidn,pr.nuptk,pr.nip,pr.institution,pr.unit_kerja,pr.avatar_url,
@@ -252,7 +265,7 @@ exports.getAll=async(req,res,next)=>{
     let q=`SELECT g.*,s.user_id AS dosen_id,u.name AS dosen_name,t.title AS task_title,t.phase,i.title AS instrument_title,ns.name AS narasumber_name
            FROM grades g JOIN submissions s ON s.id=g.submission_id JOIN users u ON u.id=s.user_id JOIN tasks t ON t.id=s.task_id LEFT JOIN instruments i ON i.id=g.instrument_id LEFT JOIN users ns ON ns.id=g.narasumber_id WHERE 1=1`;
     const params=[];
-    if(req.user.role==='DOSEN'){q+=' AND s.user_id=?';params.push(req.user.id);}
+    if(req.user.role==='DOSEN'){q+=" AND s.user_id=? AND COALESCE(g.is_draft,0)=0 AND s.status IN ('approved','remedial_approved')";params.push(req.user.id);}
     else if(req.user.role==='NARASUMBER'){q+=' AND g.narasumber_id=? AND t.period_id=?';params.push(req.user.id,req.user.period_id);}
     if(submission_id){q+=' AND g.submission_id=?';params.push(submission_id);}
     if(phase){q+=' AND t.phase=?';params.push(phase);}
@@ -263,9 +276,10 @@ exports.summary=async(req,res,next)=>{
   try{
     const tid=parseInt(req.params.userId);
     if(req.user.role==='DOSEN'&&req.user.id!==tid) return res.status(403).json({message:'Akses ditolak'});
-    const[rows]=await db.query(
-      `SELECT t.phase,t.title AS task_title,t.task_type,t.assessment_component,g.total_score,g.final_score,g.notes,i.title AS instrument_title,i.max_score,s.status
+    const[rawRows]=await db.query(
+      `SELECT t.phase,t.title AS task_title,t.task_type,t.assessment_component,g.total_score,g.final_score,g.notes,g.is_draft,i.title AS instrument_title,i.max_score,s.status
        FROM submissions s JOIN tasks t ON t.id=s.task_id LEFT JOIN grades g ON g.submission_id=s.id LEFT JOIN instruments i ON i.id=g.instrument_id WHERE s.user_id=? ORDER BY t.phase,t.order_no`,[tid]);
+    const rows=req.user.role==='DOSEN'?rawRows.map(sanitizeParticipantGradeRow):rawRows;
     const[mcq]=await db.query(
       `SELECT t.id AS task_id,t.title,t.task_type,COUNT(ma.id) AS total_q,SUM(ma.is_correct) AS correct_q
        FROM tasks t LEFT JOIN mcq_answers ma ON ma.task_id=t.id AND ma.user_id=? WHERE t.task_type IN ('PRETEST','POSTTEST') GROUP BY t.id`,[tid]);

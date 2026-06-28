@@ -11,6 +11,9 @@ const COMPONENT_TITLE_KEYWORDS = {
 const REMEDIAL_PASSING_SCORE = 60;
 const REMEDIAL_STATUSES = ['remedial_open','remedial_submitted','remedial_reviewed','remedial_approved'];
 const ALL_STATUSES = ['submitted','reviewed','revision','approved',...REMEDIAL_STATUSES];
+const PARTICIPANT_VISIBLE_GRADE_STATUSES = ['approved','remedial_approved'];
+
+const canParticipantViewGrade = ({ status, grade }) => PARTICIPANT_VISIBLE_GRADE_STATUSES.includes(status) && !Number(grade?.is_draft || 0);
 
 const ensureGradeTimelineSchema = async () => {
   const [cols] = await db.query(`SHOW COLUMNS FROM grades WHERE Field IN ('initial_graded_at','remedial_graded_at')`);
@@ -484,7 +487,7 @@ exports.getOne = async (req, res, next) => {
       || ['remedial_open','remedial_submitted','remedial_reviewed','remedial_approved'].includes(sub.status)
     );
 
-    const effective_final_score = hasRemedialHistory
+    const effectiveFinalScoreRaw = hasRemedialHistory
       ? (
           sub.initial_final_score != null && sub.remedial_final_score != null
             ? Math.max(Number(sub.initial_final_score), Number(sub.remedial_final_score))
@@ -492,14 +495,17 @@ exports.getOne = async (req, res, next) => {
         )
       : (grade?.final_score ?? null);
 
+    const participantCanViewGrade = req.user.role !== 'DOSEN' || canParticipantViewGrade({ status: sub.status, grade });
+    const effective_final_score = participantCanViewGrade ? effectiveFinalScoreRaw : null;
+
     res.json({
       ...sub,
       effective_final_score,
       revision_threads,
       upload_history: uploadHistory,
       mcq_attempts: mcqAttempts,
-      grade:                grade || null,
-      grade_aspects,
+      grade: participantCanViewGrade ? (grade || null) : null,
+      grade_aspects: participantCanViewGrade ? grade_aspects : [],
       available_instruments
     });
   } catch (e) { next(e); }
