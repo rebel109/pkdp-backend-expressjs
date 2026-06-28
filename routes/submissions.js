@@ -91,6 +91,7 @@ r.get('/debug', async (req, res) => {
 });
 
 r.get('/mcq-result', ensurePaymentVerified, c.getMcqResult);
+r.get('/admin/task-recap', authorize('ADMIN'), c.adminTaskRecap);
 r.get('/',           ensurePaymentVerified, c.getAll);
 r.get('/:id',        ensurePaymentVerified, c.getOne);
 r.post('/',          ensurePaymentVerified, uploadPdf.single('file'), c.create);

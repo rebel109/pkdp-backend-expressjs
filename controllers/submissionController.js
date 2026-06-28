@@ -89,6 +89,74 @@ const ensureRemedialSchema = async () => {
 // -------------------------------------------------------
 // GET /api/submissions
 // -------------------------------------------------------
+const ADMIN_TASK_RECAP_STATUSES = ['submitted','reviewed','revision','approved','remedial_open','remedial_submitted','remedial_reviewed','remedial_approved'];
+
+exports.adminTaskRecap = async (req, res, next) => {
+  try {
+    await ensureRemedialSchema();
+    await ensureGradeTimelineSchema();
+    const { period_id, class_id } = req.query;
+
+    if (!period_id) return res.status(400).json({ message: 'period_id wajib' });
+
+    let q = `
+      SELECT
+        u.id AS user_id,
+        u.name,
+        u.email,
+        t.id AS task_id,
+        t.title AS task_title,
+        t.phase,
+        t.task_type,
+        t.assessment_component,
+        t.material_id,
+        c.id AS class_id,
+        c.name AS class_name,
+        co.id AS cohort_id,
+        co.cohort_no,
+        s.id AS submission_id,
+        s.file_path,
+        s.link_url,
+        COALESCE(s.status, 'not_submitted') AS status,
+        s.submitted_at,
+        s.updated_at
+      FROM users u
+      JOIN class_members cm ON cm.user_id = u.id
+      JOIN classes c ON c.id = cm.class_id
+      LEFT JOIN cohorts co ON co.id = c.cohort_id
+      JOIN tasks t ON t.class_id = c.id AND t.period_id = c.period_id
+      LEFT JOIN submissions s ON s.user_id = u.id AND s.task_id = t.id
+      WHERE u.role = 'DOSEN'
+        AND u.period_id = ?
+        AND u.payment_status = 'verified'
+        AND c.period_id = ?
+        AND t.phase IN ('OJC', 'ISC2')`;
+    const params = [period_id, period_id];
+
+    if (class_id) {
+      q += ' AND c.id = ?';
+      params.push(class_id);
+    }
+
+    q += `
+      ORDER BY
+        co.cohort_no IS NULL,
+        co.cohort_no ASC,
+        u.name ASC,
+        t.phase ASC,
+        t.title ASC`;
+
+    const [rows] = await db.query(q, params);
+    const normalizedRows = rows.map(row => ({
+      ...row,
+      submitted: ADMIN_TASK_RECAP_STATUSES.includes(row.status),
+      submission_url: row.link_url || (row.file_path ? row.file_path : null)
+    }));
+
+    res.json({ rows: normalizedRows });
+  } catch (e) { next(e); }
+};
+
 exports.getAll = async (req, res, next) => {
   try {
     await ensureRemedialSchema();
