@@ -30,6 +30,53 @@ const getSettings = async ()=>{
   return settings || null;
 };
 
+const ensureCertificateNumberSettingsTable = async ()=>{
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS certificate_number_settings (
+      id INT(11) NOT NULL AUTO_INCREMENT,
+      year YEAR(4) NOT NULL,
+      certificate_no_start INT(11) NOT NULL DEFAULT 1,
+      updated_by INT(11) DEFAULT NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      UNIQUE KEY uniq_certificate_number_settings_year (year),
+      KEY idx_certificate_number_settings_updated_by (updated_by)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+};
+
+const getNumberSettingByYear = async year => {
+  await ensureCertificateNumberSettingsTable();
+  const resolvedYear=Number.parseInt(year,10);
+  if(!Number.isFinite(resolvedYear)||resolvedYear<2000||resolvedYear>9999) return null;
+  const [[row]] = await db.query(
+    `SELECT year,certificate_no_start,updated_by,updated_at FROM certificate_number_settings WHERE year=? LIMIT 1`,
+    [resolvedYear]
+  );
+  return row || null;
+};
+
+const resolveNumberSettingYear = value => {
+  const parsed=Number.parseInt(value,10);
+  const currentYear=new Date().getFullYear();
+  if(Number.isFinite(parsed)&&parsed>=2000&&parsed<=9999) return parsed;
+  return currentYear;
+};
+
+const resolveCertificateNoStart = async ({ year, fallback }) => {
+  const yearly=await getNumberSettingByYear(year);
+  if(yearly?.certificate_no_start!=null){
+    return parseCertificateNoStart(yearly.certificate_no_start, parseCertificateNoStart(fallback,1));
+  }
+  return parseCertificateNoStart(fallback,1);
+};
+
+const getPeriodOptions = async ()=>{
+  const [rows]=await db.query(`SELECT id,year,label,is_active FROM periods ORDER BY year DESC,id DESC`);
+  return rows||[];
+};
+
 const getKelulusanPeserta = async ({ userId }) => {
   const [gradeRows] = await db.query(
     `SELECT t.phase,t.task_type,t.assessment_component,g.final_score
@@ -221,9 +268,10 @@ const buildCertificateSettingsPayload=(settings,existing,body,reqUserId)=>[
 ];
 
 const getNextSerial = async ({ periodYear }) => {
+  const resolvedYear=String(Number(periodYear||new Date().getFullYear()));
   const [rows] = await db.query(
-    `SELECT certificate_no, issued_at, created_at FROM certificates WHERE YEAR(COALESCE(issued_at, created_at))=? ORDER BY id ASC`,
-    [Number(periodYear||new Date().getFullYear())]
+    `SELECT id FROM certificates WHERE JSON_UNQUOTE(JSON_EXTRACT(payload_json,'$.period_year'))=? ORDER BY id ASC`,
+    [resolvedYear]
   );
   return (rows?.length||0)+1;
 };
@@ -231,9 +279,9 @@ const getNextSerial = async ({ periodYear }) => {
 const buildNextCertificateNo = async ({ user, settings, issuedAt, activePeriod }) => {
   const periodYear=getCertificatePeriodYear({ user, activePeriod, issuedAt });
   const serial=await getNextSerial({ periodYear });
-  return makeCertificateNo({ periodYear, serial, startNo:parseCertificateNoStart(settings?.certificate_no_start,1), issuedAt });
+  const startNo=await resolveCertificateNoStart({ year:periodYear, fallback:settings?.certificate_no_start });
+  return makeCertificateNo({ periodYear, serial, startNo, issuedAt });
 };
-
 const updateExistingCertificateRecord = async ({ existing, payload, rendered, forcePublish, adminId, issuedAt }) => {
   await db.query(
     `UPDATE certificates SET payload_json=?,pdf_file=?,status=?,published_at=?,published_by=?,issued_at=? WHERE id=?`,
@@ -620,5 +668,39 @@ exports.getSettings = async (req,res,next)=>{
     ensureAdmin(req);
     const s=await getSettings();
     res.json(s||{});
+  }catch(err){next(err);}
+};
+
+exports.getNumberSetting = async (req,res,next)=>{
+  try{
+    ensureAdmin(req);
+    const year=resolveNumberSettingYear(req.query.year);
+    const [settings,periods]=await Promise.all([
+      getSettings(),
+      getPeriodOptions()
+    ]);
+    const existing=await getNumberSettingByYear(year);
+    res.json({
+      year,
+      certificate_no_start:existing?.certificate_no_start ?? parseCertificateNoStart(settings?.certificate_no_start,1),
+      periods
+    });
+  }catch(err){next(err);}
+};
+
+exports.setNumberSetting = async (req,res,next)=>{
+  try{
+    ensureAdmin(req);
+    await ensureCertificateNumberSettingsTable();
+    const year=resolveNumberSettingYear(req.body?.year);
+    const settings=await getSettings();
+    const certificateNoStart=parseCertificateNoStart(req.body?.certificate_no_start, parseCertificateNoStart(settings?.certificate_no_start,1));
+    await db.query(
+      `INSERT INTO certificate_number_settings (year,certificate_no_start,updated_by)
+       VALUES (?,?,?)
+       ON DUPLICATE KEY UPDATE certificate_no_start=VALUES(certificate_no_start),updated_by=VALUES(updated_by),updated_at=CURRENT_TIMESTAMP`,
+      [year,certificateNoStart,req.user.id]
+    );
+    res.json({message:'Nomor awal sertifikat tahunan berhasil disimpan',year,certificate_no_start:certificateNoStart});
   }catch(err){next(err);}
 };

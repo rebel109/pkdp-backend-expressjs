@@ -25,6 +25,8 @@ r.get('/:id/download', c.downloadCertificate);
 r.get('/admin/list', authorize('ADMIN'), c.adminList);
 r.get('/admin/templates', authorize('ADMIN'), c.templates);
 r.get('/admin/settings', authorize('ADMIN'), c.getSettings);
+r.get('/admin/number-settings', authorize('ADMIN'), c.getNumberSetting);
+r.put('/admin/number-settings', authorize('ADMIN'), c.setNumberSetting);
 r.patch('/admin/:id/withdraw', authorize('ADMIN'), c.withdrawCertificate);
 r.delete('/admin/:id', authorize('ADMIN'), c.removeCertificate);
 
