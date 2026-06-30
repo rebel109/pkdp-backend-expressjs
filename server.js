@@ -68,7 +68,7 @@ app.use('/api/attendance', require('./routes/attendance'));
 app.get('/api/health',(_,res)=>res.json({status:'ok',time:new Date()}));
 app.use((_,res)=>res.status(404).json({message:'Route tidak ditemukan'}));
 app.use(require('./middlewares/errorHandler'));
-const PORT=process.env.PORT||5000;
+const PORT=process.env.PORT||5001;
 
 // --- Auto-migrate on server start ---
 const mysql = require('mysql2/promise');
