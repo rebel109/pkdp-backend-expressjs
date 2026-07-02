@@ -259,8 +259,43 @@ exports.getAll = async (req, res, next) => {
              t.class_id AS task_class_id,
              c.id    AS class_id_val,
              co.id   AS cohort_id,
-             co.cohort_no,
-             COALESCE(c.name, 'Semua Kelas') AS class_name,
+             CASE
+               WHEN t.phase = 'ISC1' THEN COALESCE(
+                 selected_cohort.cohort_no,
+                 (
+                   SELECT co2.cohort_no
+                   FROM class_members cm2
+                   JOIN classes c2 ON c2.id = cm2.class_id
+                   LEFT JOIN cohorts co2 ON co2.id = c2.cohort_id
+                   WHERE cm2.user_id = s.user_id
+                     AND c2.period_id = t.period_id
+                     AND co2.cohort_no IS NOT NULL
+                   ORDER BY FIELD(c2.phase, 'ISC1', 'OJC', 'ISC2'), c2.id
+                   LIMIT 1
+                 )
+               )
+               ELSE co.cohort_no
+             END AS cohort_no,
+             CASE
+               WHEN t.phase = 'ISC1' THEN COALESCE(
+                 CONCAT('Angkatan ', COALESCE(
+                   selected_cohort.cohort_no,
+                   (
+                     SELECT co2.cohort_no
+                     FROM class_members cm2
+                     JOIN classes c2 ON c2.id = cm2.class_id
+                     LEFT JOIN cohorts co2 ON co2.id = c2.cohort_id
+                     WHERE cm2.user_id = s.user_id
+                       AND c2.period_id = t.period_id
+                       AND co2.cohort_no IS NOT NULL
+                     ORDER BY FIELD(c2.phase, 'ISC1', 'OJC', 'ISC2'), c2.id
+                     LIMIT 1
+                   )
+                 )),
+                 'Semua Angkatan'
+               )
+               ELSE COALESCE(c.name, 'Semua Kelas')
+             END AS class_name,
              g.final_score, g.total_score, g.is_draft,
              CASE
                WHEN (
@@ -280,6 +315,9 @@ exports.getAll = async (req, res, next) => {
       JOIN  tasks   t ON t.id  = s.task_id
       LEFT JOIN classes c ON c.id = t.class_id
       LEFT JOIN cohorts co ON co.id = c.cohort_id
+      LEFT JOIN profiles pr ON pr.user_id = s.user_id
+      LEFT JOIN classes selected_class ON selected_class.id = pr.selected_class_id
+      LEFT JOIN cohorts selected_cohort ON selected_cohort.id = selected_class.cohort_id
       LEFT JOIN grades  g ON g.submission_id = s.id
       WHERE 1=1`;
     const params = [];
