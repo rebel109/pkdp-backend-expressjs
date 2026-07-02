@@ -273,7 +273,7 @@ exports.getAll = async (req, res, next) => {
                    WHEN s.initial_final_score IS NOT NULL AND s.remedial_final_score IS NOT NULL THEN GREATEST(s.initial_final_score, s.remedial_final_score)
                    ELSE COALESCE(s.remedial_final_score, s.initial_final_score, g.final_score)
                  END
-               ELSE g.final_score
+               ELSE COALESCE(g.final_score, s.initial_final_score)
              END AS effective_final_score
       FROM submissions s
       JOIN  users   u ON u.id  = s.user_id
@@ -726,13 +726,13 @@ exports.submitMcq = async (req, res, next) => {
        VALUES (?,?,?,?,?,?,?,?,?)`,
       [submissionId, req.user.id, task_id, attemptInfo.next_attempt, requestedRemedial ? 1 : 0, score, correct, questions.length, JSON.stringify(answersJson)]
     );
-    if (!requestedRemedial && task.task_type === 'POSTTEST' && score < REMEDIAL_PASSING_SCORE) {
+    if (!requestedRemedial && task.task_type === 'POSTTEST' && score <= REMEDIAL_PASSING_SCORE) {
       await db.query('UPDATE submissions SET initial_final_score = COALESCE(initial_final_score, ?) WHERE id = ?', [score, submissionId]);
     }
     const message = mode === 'timeout_auto'
       ? 'Waktu habis. Jawaban yang sudah diisi berhasil disimpan'
       : 'Jawaban tersimpan';
-    res.json({ message, correct, total: questions.length, score, remedial_eligible: task.task_type === 'POSTTEST' && score < REMEDIAL_PASSING_SCORE });
+    res.json({ message, correct, total: questions.length, score, remedial_eligible: task.task_type === 'POSTTEST' && score <= REMEDIAL_PASSING_SCORE });
   } catch (e) { next(e); }
 };
 

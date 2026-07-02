@@ -920,18 +920,35 @@ exports.allSummary=async(req,res,next)=>{
     let classMembers=[];
     if(dosenIds.length){
       const placeholders=dosenIds.map(()=>'?').join(',');
-      let cmQ=`SELECT cm.user_id,cm.class_id,co.cohort_no FROM class_members cm JOIN classes c ON c.id=cm.class_id LEFT JOIN cohorts co ON co.id=c.cohort_id WHERE cm.user_id IN (${placeholders})`;
+      let cmQ=`SELECT cm.user_id,cm.class_id,c.name AS class_name,c.phase AS class_phase,co.cohort_no
+               FROM class_members cm
+               JOIN classes c ON c.id=cm.class_id
+               LEFT JOIN cohorts co ON co.id=c.cohort_id
+               WHERE cm.user_id IN (${placeholders})`;
       const cmParams=[...dosenIds];
       if(period_id){cmQ+=' AND c.period_id=?';cmParams.push(period_id);}
+      cmQ+=' ORDER BY cm.user_id,c.phase,c.name,c.id';
       const[cmRows]=await db.query(cmQ,cmParams);
       classMembers=cmRows;
     }
 
     const userClassMap=new Map();
+    const userClassInfoMap=new Map();
     const userCohortMap=new Map();
     classMembers.forEach(cm=>{
       if(!userClassMap.has(cm.user_id)) userClassMap.set(cm.user_id,new Set());
       userClassMap.get(cm.user_id).add(cm.class_id);
+
+      if(!userClassInfoMap.has(cm.user_id)) userClassInfoMap.set(cm.user_id,[]);
+      const classInfos=userClassInfoMap.get(cm.user_id);
+      if(cm.class_id && !classInfos.some(info=>info.class_id===cm.class_id)){
+        classInfos.push({
+          class_id:cm.class_id,
+          class_name:cm.class_name||null,
+          class_phase:cm.class_phase||null
+        });
+      }
+
       if(!userCohortMap.has(cm.user_id) && cm.cohort_no!=null) userCohortMap.set(cm.user_id,cm.cohort_no);
     });
 
@@ -949,6 +966,13 @@ exports.allSummary=async(req,res,next)=>{
       const userMcq=mcqScores.filter(m=>m.user_id===userId);
       const userClassIds=userClassMap.get(userId)||new Set();
       const cohortNo=userCohortMap.get(userId) ?? null;
+      const classInfos=(userClassInfoMap.get(userId)||[])
+        .filter(info=>!phase||!info.class_phase||info.class_phase===phase)
+        .map(info=>({
+          class_id:info.class_id,
+          class_name:info.class_name,
+          class_phase:info.class_phase
+        }));
 
       const phaseState={ISC1:null,OJC:null,ISC2:null};
 
@@ -1058,6 +1082,7 @@ exports.allSummary=async(req,res,next)=>{
       return{
         ...d,
         cohort_no:cohortNo,
+        classes:classInfos,
         phases,
         phase_scores:nilaiBesar,
         nilai_besar:nilaiBesar,
