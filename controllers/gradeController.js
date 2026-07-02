@@ -51,6 +51,7 @@ const REKAP_FORMULA={
 const round=n=>Math.round(n);
 
 const avg=arr=>arr.length?round(arr.reduce((s,v)=>s+v,0)/arr.length):null;
+const hasFinalizedScore=sub=>sub?.final_score!=null&&!Number(sub?.is_draft||0);
 
 const strictWeightedScore=(componentScores,weights)=>{
   const keys=Object.keys(weights);
@@ -84,7 +85,7 @@ const finalNKKontribusi=(isc1,ojc,isc2)=>{
 
 const progressNKKontribusi=(isc1,ojc,isc2)=>{
   const hasAny=[isc1,ojc,isc2].some(v=>v!=null);
-  if(!hasAny) return 0;
+  if(!hasAny) return null;
   return round(
     ((isc1??0)*NK_FORMULA.isc1+
      (ojc??0)*NK_FORMULA.ojc+
@@ -97,7 +98,7 @@ const buildComponentScores=(subs,weightMap)=>{
   Object.keys(weightMap).forEach(key=>{scores[key]=null;});
   const grouped={};
   subs.forEach(s=>{
-    if(!s.assessment_component||s.final_score==null) return;
+    if(!s.assessment_component||!hasFinalizedScore(s)) return;
     if(!weightMap[s.assessment_component]) return;
     if(!grouped[s.assessment_component]) grouped[s.assessment_component]=[];
     grouped[s.assessment_component].push(Number(s.final_score));
@@ -144,13 +145,13 @@ const calcIsc1Score=(pretestScore,posttestScore)=>{
 const calcIsc1ProgressScore=(pretestScore,posttestScore)=>{
   if(posttestScore!=null) return round(posttestScore);
   if(pretestScore!=null) return 0;
-  return 0;
+  return null;
 };
 
 const partialWeightedScore=(componentScores,weights)=>{
   const keys=Object.keys(weights);
   const hasAny=keys.some(k=>componentScores[k]!=null);
-  if(!hasAny) return 0;
+  if(!hasAny) return null;
   const weightedTotal=keys.reduce((sum,key)=>sum+((componentScores[key]??0)*weights[key]),0);
   return round(weightedTotal/100);
 };
@@ -209,7 +210,7 @@ const buildParticipantRecapData=async({period_id,phase,class_id})=>{
   let submissions=[];
   if(userIds.length){
     const placeholders=userIds.map(()=>'?').join(',');
-    let subQ=`SELECT s.user_id,s.task_id,s.status AS submission_status,s.submitted_at,t.phase,t.task_type,t.assessment_component,g.final_score
+    let subQ=`SELECT s.user_id,s.task_id,s.status AS submission_status,s.submitted_at,t.phase,t.task_type,t.assessment_component,g.final_score,g.is_draft
               FROM submissions s
               LEFT JOIN grades g ON g.submission_id=s.id
               JOIN tasks t ON t.id=s.task_id
@@ -893,7 +894,7 @@ exports.allSummary=async(req,res,next)=>{
 
     // Ambil semua submission & grades (TANPA filter phase - ambil semua dulu)
     let subQ=`SELECT s.user_id,t.phase,t.title,t.task_type,t.assessment_component,t.id AS task_id,
-                     g.final_score,g.total_score,
+                     g.final_score,g.total_score,g.is_draft,
                      s.status AS submission_status,s.submitted_at
               FROM submissions s
               JOIN tasks t ON t.id=s.task_id
